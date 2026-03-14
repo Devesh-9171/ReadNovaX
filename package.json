@@ -1,0 +1,12 @@
+{
+  "name": "narrativax",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Full-stack storytelling platform scaffold",
+  "scripts": {
+    "install:all": "npm --prefix backend install && npm --prefix frontend install",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "build:frontend": "npm --prefix frontend run build"
+  }
+}
