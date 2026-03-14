@@ -38,7 +38,10 @@ exports.getBooks = asyncHandler(async (req, res) => {
   const query = {};
 
   if (category) query.category = category;
-  if (search) query.$text = { $search: search };
+  if (search) {
+    const pattern = new RegExp(String(search).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    query.$or = [{ title: pattern }, { author: pattern }, { category: pattern }];
+  }
 
   const sortMap = {
     updatedAt: { updatedAt: -1 },
