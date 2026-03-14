@@ -18,7 +18,10 @@ function required(name, fallback = '') {
 const config = {
   nodeEnv: process.env.NODE_ENV || 'development',
   port: toNumber(process.env.PORT, 5000),
-  mongoUri: required('MONGO_URI', process.env.NODE_ENV === 'test' ? 'mongodb://localhost:27017/narrativax-test' : ''),
+  mongoUri: required(
+    'MONGO_URI',
+    process.env.NODE_ENV === 'test' ? 'mongodb://localhost:27017/narrativax-test' : 'mongodb://localhost:27017/narrativax'
+  ),
   jwtSecret: required('JWT_SECRET', process.env.NODE_ENV === 'development' ? 'dev-only-change-me' : ''),
   clientUrls: (process.env.CLIENT_URL || 'http://localhost:3000').split(',').map((url) => url.trim()),
   cacheTtlSeconds: toNumber(process.env.CACHE_TTL_SECONDS, 60),
