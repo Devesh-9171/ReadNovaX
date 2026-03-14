@@ -7,14 +7,23 @@ import AdSlot from '../../../components/AdSlot';
 import api from '../../../utils/api';
 import { buildMeta } from '../../../utils/seo';
 
-export default function ChapterPage({ book, chapter, previousChapter, nextChapter }) {
+export default function ChapterPage({ book, chapter, previousChapter, nextChapter, error }) {
   const [settings, setSettings] = useState({ dark: false, fontSize: 18, lineHeight: 1.8 });
-  const paragraphs = useMemo(() => chapter.content.split('\n\n'), [chapter.content]);
+  const content = chapter?.content || '';
+  const paragraphs = useMemo(() => content.split('\n\n').filter(Boolean), [content]);
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', settings.dark);
     return () => document.documentElement.classList.remove('dark');
   }, [settings.dark]);
+
+  if (error || !book || !chapter) {
+    return (
+      <Layout>
+        <p className="rounded border border-red-200 bg-red-50 p-4 text-red-600">{error || 'Chapter not found'}</p>
+      </Layout>
+    );
+  }
 
   const onBookmark = () => {
     localStorage.setItem(`bookmark:${book.slug}`, chapter.slug);
@@ -57,6 +66,10 @@ export default function ChapterPage({ book, chapter, previousChapter, nextChapte
 }
 
 export async function getServerSideProps({ params }) {
-  const { data } = await api.get(`/chapters/${params.slug}/${params.chapterSlug}`);
-  return { props: data };
+  try {
+    const { data } = await api.get(`/chapters/${params.slug}/${params.chapterSlug}`);
+    return { props: { ...data, error: null } };
+  } catch (error) {
+    return { props: { book: null, chapter: null, previousChapter: null, nextChapter: null, error: error.message } };
+  }
 }

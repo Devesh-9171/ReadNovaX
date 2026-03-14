@@ -1,11 +1,19 @@
 import Image from 'next/image';
 import Link from 'next/link';
 
-export default function BookCard({ book }) {
+export default function BookCard({ book, priority = false }) {
   return (
     <article className="overflow-hidden rounded-xl border bg-white shadow-sm transition hover:-translate-y-1 dark:border-slate-800 dark:bg-slate-900">
       <div className="relative h-56 w-full">
-        <Image src={book.coverImage} alt={book.title} fill className="object-cover" />
+        <Image
+          src={book.coverImage}
+          alt={book.title}
+          fill
+          className="object-cover"
+          sizes="(max-width: 768px) 50vw, 25vw"
+          loading={priority ? 'eager' : 'lazy'}
+          priority={priority}
+        />
       </div>
       <div className="space-y-2 p-4">
         <h3 className="line-clamp-1 font-semibold">{book.title}</h3>

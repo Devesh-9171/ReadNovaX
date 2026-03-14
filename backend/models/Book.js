@@ -23,5 +23,8 @@ const bookSchema = new mongoose.Schema(
 );
 
 bookSchema.index({ title: 'text', author: 'text', category: 'text' });
+bookSchema.index({ category: 1, totalViews: -1 });
+bookSchema.index({ featured: 1, updatedAt: -1 });
+bookSchema.index({ updatedAt: -1 });
 
 module.exports = mongoose.model('Book', bookSchema);

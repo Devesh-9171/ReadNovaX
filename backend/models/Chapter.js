@@ -14,5 +14,6 @@ const chapterSchema = new mongoose.Schema(
 
 chapterSchema.index({ bookId: 1, chapterNumber: 1 }, { unique: true });
 chapterSchema.index({ bookId: 1, slug: 1 }, { unique: true });
+chapterSchema.index({ updatedAt: -1 });
 
 module.exports = mongoose.model('Chapter', chapterSchema);
