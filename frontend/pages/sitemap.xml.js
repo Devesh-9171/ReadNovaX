@@ -12,12 +12,28 @@ function generateSiteMap(origin, books = []) {
   <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls.join('')}</urlset>`;
 }
 
+async function fetchAllBooks() {
+  const allBooks = [];
+  let page = 1;
+  let totalPages = 1;
+
+  while (page <= totalPages) {
+    const { data } = await api.get('/books', { params: { page, limit: 100, sort: 'updatedAt' } });
+    allBooks.push(...(data.data || []));
+    totalPages = data.pagination?.totalPages || 1;
+    page += 1;
+  }
+
+  return allBooks;
+}
+
 export async function getServerSideProps({ res }) {
   const origin = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
-  const { data: books } = await api.get('/books');
+  const books = await fetchAllBooks();
   const sitemap = generateSiteMap(origin, books);
 
   res.setHeader('Content-Type', 'text/xml');
+  res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate=86400');
   res.write(sitemap);
   res.end();
 

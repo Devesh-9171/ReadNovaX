@@ -6,7 +6,15 @@ import AdSlot from '../../../components/AdSlot';
 import api from '../../../utils/api';
 import { buildMeta } from '../../../utils/seo';
 
-export default function BookPage({ book, chapters }) {
+export default function BookPage({ book, chapters, error }) {
+  if (error) {
+    return (
+      <Layout>
+        <p className="rounded border border-red-200 bg-red-50 p-4 text-red-600">{error}</p>
+      </Layout>
+    );
+  }
+
   const meta = buildMeta({
     title: `${book.title} by ${book.author} | NarrativaX`,
     description: book.description,
@@ -22,7 +30,7 @@ export default function BookPage({ book, chapters }) {
       />
       <div className="grid gap-8 md:grid-cols-[250px_1fr]">
         <div className="relative h-80 w-full overflow-hidden rounded-xl">
-          <Image src={book.coverImage} alt={book.title} fill className="object-cover" />
+          <Image src={book.coverImage} alt={book.title} fill className="object-cover" sizes="(max-width: 768px) 100vw, 250px" priority />
         </div>
         <div>
           <h1 className="text-3xl font-bold">{book.title}</h1>
@@ -54,6 +62,10 @@ export default function BookPage({ book, chapters }) {
 }
 
 export async function getServerSideProps({ params }) {
-  const { data } = await api.get(`/books/${params.slug}`);
-  return { props: data };
+  try {
+    const { data } = await api.get(`/books/${params.slug}`);
+    return { props: { ...data, error: null } };
+  } catch (error) {
+    return { props: { book: null, chapters: [], error: error.message } };
+  }
 }

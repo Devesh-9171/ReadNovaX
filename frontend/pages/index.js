@@ -6,7 +6,7 @@ import AdSlot from '../components/AdSlot';
 import api from '../utils/api';
 import { buildMeta } from '../utils/seo';
 
-export default function Home({ data }) {
+export default function Home({ data, error }) {
   const meta = buildMeta({
     title: 'NarrativaX - Read trending novels online',
     description: 'Discover trending books, latest chapters, and immersive reading on NarrativaX.',
@@ -25,20 +25,26 @@ export default function Home({ data }) {
 
       <AdSlot label="Top Banner Ad" className="mb-8" />
 
-      <Section title="Featured Novels" books={data.featured} />
-      <Section title="Trending Books" books={data.trending} />
-      <Section title="Popular Books" books={data.popular} />
+      {error ? (
+        <p className="rounded border border-red-200 bg-red-50 p-4 text-red-600">{error}</p>
+      ) : (
+        <>
+          <Section title="Featured Novels" books={data.featured} />
+          <Section title="Trending Books" books={data.trending} />
+          <Section title="Popular Books" books={data.popular} />
 
-      <section className="mb-8">
-        <h2 className="mb-4 text-2xl font-bold">Latest Chapters</h2>
-        <div className="space-y-2 rounded-xl border bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
-          {data.latestChapters.map((chapter) => (
-            <Link key={chapter._id} className="block rounded p-2 hover:bg-slate-100 dark:hover:bg-slate-800" href={`/books/${chapter.bookId.slug}/${chapter.slug}`}>
-              {chapter.bookId.title} — Chapter {chapter.chapterNumber}: {chapter.title}
-            </Link>
-          ))}
-        </div>
-      </section>
+          <section className="mb-8">
+            <h2 className="mb-4 text-2xl font-bold">Latest Chapters</h2>
+            <div className="space-y-2 rounded-xl border bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+              {data.latestChapters.map((chapter) => (
+                <Link key={chapter._id} className="block rounded p-2 hover:bg-slate-100 dark:hover:bg-slate-800" href={`/books/${chapter.bookId.slug}/${chapter.slug}`}>
+                  {chapter.bookId.title} — Chapter {chapter.chapterNumber}: {chapter.title}
+                </Link>
+              ))}
+            </div>
+          </section>
+        </>
+      )}
 
       <section>
         <h2 className="mb-4 text-2xl font-bold">Categories</h2>
@@ -59,13 +65,22 @@ function Section({ title, books }) {
     <section className="mb-8">
       <h2 className="mb-4 text-2xl font-bold">{title}</h2>
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        {books.map((book) => <BookCard key={book._id} book={book} />)}
+        {books.map((book, index) => <BookCard key={book._id} book={book} priority={index < 2} />)}
       </div>
     </section>
   );
 }
 
 export async function getServerSideProps() {
-  const { data } = await api.get('/books/homepage');
-  return { props: { data } };
+  try {
+    const { data } = await api.get('/books/homepage');
+    return { props: { data, error: null } };
+  } catch (error) {
+    return {
+      props: {
+        data: { featured: [], trending: [], popular: [], latestChapters: [] },
+        error: error.message
+      }
+    };
+  }
 }
