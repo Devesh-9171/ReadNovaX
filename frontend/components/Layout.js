@@ -1,21 +1,73 @@
 import Link from 'next/link';
 import Image from 'next/image';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/router';
 
 export default function Layout({ children }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [darkMode, setDarkMode] = useState(false);
+  const [search, setSearch] = useState('');
+  const router = useRouter();
+
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('theme');
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const shouldUseDark = savedTheme ? savedTheme === 'dark' : prefersDark;
+    setDarkMode(shouldUseDark);
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', darkMode);
+    localStorage.setItem('theme', darkMode ? 'dark' : 'light');
+  }, [darkMode]);
+
+  const submitSearch = (e) => {
+    e.preventDefault();
+    const query = search.trim();
+    if (!query) return;
+    setMenuOpen(false);
+    router.push(`/search?q=${encodeURIComponent(query)}`);
+  };
+
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-40 border-b bg-white/90 backdrop-blur dark:bg-slate-900/90 dark:border-slate-800">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-3 px-4 py-3">
           <Link href="/" className="flex items-center gap-2 font-bold text-xl text-brand-600">
             <Image src="/images/logo.svg" alt="NarrativaX" width={40} height={40} />
             NarrativaX
           </Link>
-          <nav className="flex gap-4 text-sm font-medium">
+
+          <button
+            onClick={() => setMenuOpen((value) => !value)}
+            className="rounded border px-2 py-1 text-sm md:hidden"
+            aria-label="Toggle menu"
+          >
+            Menu
+          </button>
+
+          <form onSubmit={submitSearch} className="order-3 flex w-full gap-2 md:order-none md:ml-auto md:w-auto">
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full rounded border px-3 py-1.5 text-sm md:w-64"
+              placeholder="Search books..."
+              aria-label="Search books"
+            />
+            <button className="rounded bg-brand-600 px-3 py-1.5 text-sm text-white">Search</button>
+          </form>
+
+          <nav className={`${menuOpen ? 'flex' : 'hidden'} w-full flex-wrap gap-4 text-sm font-medium md:flex md:w-auto`}>
             <Link href="/category/action">Action</Link>
             <Link href="/category/romance">Romance</Link>
             <Link href="/category/comedy">Comedy</Link>
             <Link href="/profile">Profile</Link>
             <Link href="/admin">Admin</Link>
+            <Link href="/auth/login">Login</Link>
+            <Link href="/auth/signup">Sign Up</Link>
+            <button onClick={() => setDarkMode((value) => !value)} className="rounded border px-2 py-0.5">
+              {darkMode ? 'Light' : 'Dark'}
+            </button>
           </nav>
         </div>
       </header>

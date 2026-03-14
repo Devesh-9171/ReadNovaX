@@ -36,7 +36,7 @@ export default function Home({ data, error }) {
           <section className="mb-8">
             <h2 className="mb-4 text-2xl font-bold">Latest Chapters</h2>
             <div className="space-y-2 rounded-xl border bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
-              {data.latestChapters.map((chapter) => (
+              {data.latestChapters.filter((chapter) => chapter.bookId).map((chapter) => (
                 <Link key={chapter._id} className="block rounded p-2 hover:bg-slate-100 dark:hover:bg-slate-800" href={`/books/${chapter.bookId.slug}/${chapter.slug}`}>
                   {chapter.bookId.title} — Chapter {chapter.chapterNumber}: {chapter.title}
                 </Link>

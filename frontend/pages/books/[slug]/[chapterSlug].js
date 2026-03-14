@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import Layout from '../../../components/Layout';
 import SeoHead from '../../../components/SeoHead';
 import ReaderControls from '../../../components/ReaderControls';
@@ -8,14 +8,10 @@ import api from '../../../utils/api';
 import { buildMeta } from '../../../utils/seo';
 
 export default function ChapterPage({ book, chapter, previousChapter, nextChapter, error }) {
-  const [settings, setSettings] = useState({ dark: false, fontSize: 18, lineHeight: 1.8 });
+  const [settings, setSettings] = useState({ fontSize: 18, lineHeight: 1.8 });
+  const [bookmarkMessage, setBookmarkMessage] = useState('');
   const content = chapter?.content || '';
   const paragraphs = useMemo(() => content.split('\n\n').filter(Boolean), [content]);
-
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', settings.dark);
-    return () => document.documentElement.classList.remove('dark');
-  }, [settings.dark]);
 
   if (error || !book || !chapter) {
     return (
@@ -25,9 +21,21 @@ export default function ChapterPage({ book, chapter, previousChapter, nextChapte
     );
   }
 
-  const onBookmark = () => {
-    localStorage.setItem(`bookmark:${book.slug}`, chapter.slug);
-    alert('Bookmarked chapter');
+  const onBookmark = async () => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      setBookmarkMessage('Login required to save bookmarks.');
+      return;
+    }
+
+    try {
+      await api.post(`/user/bookmark/${chapter._id}`, null, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setBookmarkMessage('Bookmark updated.');
+    } catch (bookmarkError) {
+      setBookmarkMessage(bookmarkError.message || 'Could not update bookmark.');
+    }
   };
 
   const meta = buildMeta({
@@ -44,6 +52,7 @@ export default function ChapterPage({ book, chapter, previousChapter, nextChapte
         <div className="h-full w-1/2 bg-brand-600" />
       </div>
       <ReaderControls settings={settings} setSettings={setSettings} onBookmark={onBookmark} />
+      {bookmarkMessage && <p className="mb-4 rounded border p-2 text-sm dark:border-slate-700">{bookmarkMessage}</p>}
 
       <article className="rounded-xl bg-white p-6 shadow-sm dark:bg-slate-900" style={{ fontSize: `${settings.fontSize}px`, lineHeight: settings.lineHeight }}>
         <h1 className="mb-5 text-3xl font-bold">{chapter.title}</h1>
