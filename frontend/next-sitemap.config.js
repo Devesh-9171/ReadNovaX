@@ -1,9 +1,20 @@
-const DEFAULT_SITE_URL = 'http://localhost:3000';
+const DEFAULT_SITE_URL = "https://read-nova-x-frontend.vercel.app";
 const siteUrl = process.env.SITE_URL || process.env.NEXT_PUBLIC_SITE_URL || DEFAULT_SITE_URL;
-const apiBaseUrl = (process.env.NEXT_PUBLIC_API_BASE_URL || process.env.API_BASE_URL || 'http://localhost:5000/api').replace(/\/$/, '');
+const apiBaseUrl = (process.env.NEXT_PUBLIC_API_URL || "https://readnovax.onrender.com") + "/api";
+
+function getValidatedApiBaseUrl() {
+  try {
+    const parsed = new URL(apiBaseUrl);
+    return parsed.toString().replace(/\/$/, '');
+  } catch {
+    return 'https://readnovax.onrender.com/api';
+  }
+}
+
+const validatedApiBaseUrl = getValidatedApiBaseUrl();
 
 async function requestJson(path) {
-  const response = await fetch(`${apiBaseUrl}${path}`);
+  const response = await fetch(`${validatedApiBaseUrl}${path}`);
 
   if (!response.ok) {
     throw new Error(`Failed to fetch ${path}: ${response.status} ${response.statusText}`);

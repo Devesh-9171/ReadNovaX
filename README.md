@@ -50,8 +50,8 @@ npm install
 npm run dev
 ```
 
-Frontend: `http://localhost:3000`  
-Backend: `http://localhost:5000`
+Frontend: `https://read-nova-x-frontend.vercel.app`  
+Backend: `https://readnovax.onrender.com`
 
 ## Deployment
 ### Option A: Cloud (recommended)

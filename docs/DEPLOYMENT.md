@@ -3,12 +3,12 @@
 ## Environment Variables
 ### Backend
 - `PORT=5000`
-- `MONGO_URI=mongodb://localhost:27017/narrativax`
+- `MONGO_URI=mongodb://127.0.0.1:27017/narrativax`
 - `JWT_SECRET=change-me`
 - `CLIENT_URL=https://your-frontend-domain`
 
 ### Frontend
-- `NEXT_PUBLIC_API_BASE_URL=https://api.yourdomain.com/api`
+- `NEXT_PUBLIC_API_URL=https://readnovax.onrender.com`
 - `NEXT_PUBLIC_SITE_URL=https://www.yourdomain.com`
 - `NEXT_PUBLIC_GA_ID=G-XXXXXXXXXX`
 - `NEXT_PUBLIC_ADSENSE_CLIENT=ca-pub-xxxxxxxxxxxxxxxx`

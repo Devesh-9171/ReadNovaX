@@ -3,7 +3,7 @@ const nextConfig = {
   images: {
     remotePatterns: [
       { protocol: 'https', hostname: 'images.unsplash.com' },
-      { protocol: 'http', hostname: 'localhost' }
+      { protocol: 'https', hostname: 'readnovax.onrender.com' }
     ],
     formats: ['image/avif', 'image/webp'],
     minimumCacheTTL: 60
