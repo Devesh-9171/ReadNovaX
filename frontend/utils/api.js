@@ -1,7 +1,20 @@
 import axios from 'axios';
 
+const DEFAULT_API_URL = 'https://readnovax.onrender.com';
+
+function resolveApiBaseUrl() {
+  const candidate = (process.env.NEXT_PUBLIC_API_URL || DEFAULT_API_URL).trim();
+
+  try {
+    const parsed = new URL(candidate);
+    return `${parsed.origin}/api`;
+  } catch {
+    return `${DEFAULT_API_URL}/api`;
+  }
+}
+
 const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5000/api',
+  baseURL: resolveApiBaseUrl(),
   timeout: 10000
 });
 

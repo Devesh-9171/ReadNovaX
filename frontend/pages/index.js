@@ -6,7 +6,7 @@ import AdSlot from '../components/AdSlot';
 import api from '../utils/api';
 import { buildMeta } from '../utils/seo';
 
-export default function Home({ data, error }) {
+export default function Home({ data, error, categories }) {
   const meta = buildMeta({
     title: 'ReadNovaX - Read trending novels online',
     description: 'Discover trending books, latest chapters, and immersive reading on ReadNovaX.',
@@ -63,7 +63,7 @@ export default function Home({ data, error }) {
       <section>
         <h2 className="mb-4 text-2xl font-bold">Categories</h2>
         <div className="flex flex-wrap gap-3">
-          {['action', 'romance', 'comedy', 'mystery', 'finance'].map((cat) => (
+          {categories.map((cat) => (
             <Link key={cat} href={`/category/${cat}`} className="rounded-full bg-slate-200 px-4 py-2 capitalize dark:bg-slate-800">
               {cat}
             </Link>
@@ -88,11 +88,20 @@ function Section({ title, books }) {
 export async function getServerSideProps() {
   try {
     const { data } = await api.get('/books/homepage');
-    return { props: { data, error: null } };
+    const categorySet = new Set();
+
+    for (const group of [data.featured, data.trending, data.popular]) {
+      for (const book of group || []) {
+        if (book?.category) categorySet.add(book.category);
+      }
+    }
+
+    return { props: { data, categories: Array.from(categorySet), error: null } };
   } catch (error) {
     return {
       props: {
         data: { featured: [], trending: [], popular: [], latestChapters: [] },
+        categories: [],
         error: error.message
       }
     };

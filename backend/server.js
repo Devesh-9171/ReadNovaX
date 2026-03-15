@@ -44,7 +44,7 @@ app.use(errorHandler);
 
 connectDB(config.mongoUri)
   .then(() => {
-    app.listen(config.port, () => console.log(`Backend running on http://localhost:${config.port}`));
+    app.listen(config.port, () => console.log(`Backend running on port ${config.port}`));
   })
   .catch((error) => {
     console.error('DB connection failed', error);
