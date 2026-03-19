@@ -34,6 +34,7 @@ export default function Layout({ children }) {
       { href: '/category/action', label: 'Action' },
       { href: '/category/romance', label: 'Romance' },
       { href: '/category/comedy', label: 'Comedy' },
+      { href: '/blog', label: 'Blog' },
       { href: '/profile', label: 'Profile' },
       { href: '/admin', label: 'Admin' }
     ],
@@ -124,6 +125,7 @@ export default function Layout({ children }) {
             <Link href="/about" className="transition hover:text-brand-600 dark:hover:text-sky-300">About</Link>
             <Link href="/contact" className="transition hover:text-brand-600 dark:hover:text-sky-300">Contact</Link>
             <Link href="/terms" className="transition hover:text-brand-600 dark:hover:text-sky-300">Terms</Link>
+            <Link href="/blog" className="transition hover:text-brand-600 dark:hover:text-sky-300">Blog</Link>
           </nav>
           <p>© {new Date().getFullYear()} ReadNovaX. Read brighter.</p>
         </div>
