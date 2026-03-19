@@ -8,12 +8,16 @@ body {
   font-family: Inter, Poppins, system-ui, -apple-system, sans-serif;
 }
 
+body {
+  min-height: 100vh;
+}
+
 .dark body {
   @apply bg-slate-950 text-slate-100;
 }
 
 .reader-paragraph {
-  @apply mb-5 leading-8;
+  @apply mb-0 text-[1em];
 }
 
 .brand-logo-text {
@@ -81,16 +85,25 @@ body {
     opacity: 1;
     transform: none;
   }
-}
 
+  html {
+    scroll-behavior: auto;
+  }
+}
 
 input,
 textarea,
 select {
+  color-scheme: light;
+}
+
+.dark input,
+.dark textarea,
+.dark select {
   color-scheme: dark;
 }
 
 input::placeholder,
 textarea::placeholder {
-  @apply text-gray-400;
+  @apply text-slate-400;
 }

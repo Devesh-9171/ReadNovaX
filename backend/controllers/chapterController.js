@@ -15,12 +15,21 @@ exports.createChapter = asyncHandler(async (req, res) => {
   const book = await Book.findById(bookId).select('_id');
   if (!book) throw new AppError('Book not found', 404);
 
+  const baseSlug = slugify(String(title).trim() || `chapter-${chapterNumber}`, { lower: true, strict: true }) || `chapter-${chapterNumber}`;
+  let slug = baseSlug;
+  let suffix = 1;
+
+  while (await Chapter.exists({ bookId: book._id, slug })) {
+    suffix += 1;
+    slug = `${baseSlug}-${suffix}`;
+  }
+
   const chapter = await Chapter.create({
     bookId: book._id,
     chapterNumber: Number(chapterNumber),
     title: String(title).trim(),
     content: String(content).trim(),
-    slug: slugify(String(title).trim() || `chapter-${chapterNumber}`, { lower: true, strict: true })
+    slug
   });
 
   cache.flushAll();
@@ -55,12 +64,13 @@ exports.getChapter = asyncHandler(async (req, res) => {
 
   await Book.updateOne({ _id: book._id }, { $set: { trendingScore: nextTrendingScore } });
 
-  const [previousChapter, nextChapter] = await Promise.all([
+  const [previousChapter, nextChapter, chapters] = await Promise.all([
     Chapter.findOne({ bookId: book._id, chapterNumber: chapter.chapterNumber - 1 }).select('title slug chapterNumber').lean(),
-    Chapter.findOne({ bookId: book._id, chapterNumber: chapter.chapterNumber + 1 }).select('title slug chapterNumber').lean()
+    Chapter.findOne({ bookId: book._id, chapterNumber: chapter.chapterNumber + 1 }).select('title slug chapterNumber').lean(),
+    Chapter.find({ bookId: book._id }).sort({ chapterNumber: 1 }).select('title slug chapterNumber').lean()
   ]);
 
-  const payload = { book: { ...book, trendingScore: nextTrendingScore }, chapter, previousChapter, nextChapter };
+  const payload = { book: { ...book, trendingScore: nextTrendingScore }, chapter, chapters, previousChapter, nextChapter };
   cache.set(key, payload, 30);
   res.json(payload);
 });

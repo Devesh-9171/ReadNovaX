@@ -38,6 +38,42 @@ exports.createBook = asyncHandler(async (req, res) => {
   res.status(201).json({ success: true, book });
 });
 
+exports.updateBook = asyncHandler(async (req, res) => {
+  const { title, author, category, description, coverImage, featured } = req.body;
+  const book = await Book.findById(req.params.id);
+  if (!book) throw new AppError('Book not found', 404);
+
+  const nextTitle = title ? String(title).trim() : book.title;
+  const nextSlug = slugify(nextTitle, { lower: true, strict: true });
+  const duplicate = await Book.findOne({ slug: nextSlug, _id: { $ne: book._id } }).lean();
+  if (duplicate) {
+    throw new AppError('Another book already uses this title', 409);
+  }
+
+  book.title = nextTitle;
+  book.slug = nextSlug;
+  book.author = String(author || book.author || 'ReadNovaX Editorial').trim();
+  book.category = category ? String(category).trim() : book.category;
+  book.description = description ? String(description).trim() : book.description;
+  book.coverImage = coverImage ? String(coverImage).trim() : book.coverImage;
+  if (typeof featured !== 'undefined') book.featured = Boolean(featured);
+
+  await book.save();
+  cache.flushAll();
+
+  res.json({ success: true, book });
+});
+
+exports.deleteBook = asyncHandler(async (req, res) => {
+  const book = await Book.findById(req.params.id).select('_id');
+  if (!book) throw new AppError('Book not found', 404);
+
+  await Promise.all([Chapter.deleteMany({ bookId: book._id }), Book.deleteOne({ _id: book._id })]);
+  cache.flushAll();
+
+  res.json({ success: true, message: 'Book deleted' });
+});
+
 exports.getHomepage = asyncHandler(async (_req, res) => {
   const key = cacheKey(['homepage']);
   const cached = cache.get(key);
@@ -83,7 +119,7 @@ exports.getBooks = asyncHandler(async (req, res) => {
       .sort(sortMap[sort] || sortMap.updatedAt)
       .skip(skip)
       .limit(limit)
-      .select('title slug author category coverImage rating totalViews featured updatedAt')
+      .select('title slug author category coverImage description rating totalViews featured updatedAt')
       .lean(),
     Book.countDocuments(query)
   ]);
