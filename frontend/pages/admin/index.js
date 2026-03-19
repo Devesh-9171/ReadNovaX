@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Layout from '../../components/Layout';
 import api from '../../utils/api';
+import BlogContent from '../../components/BlogContent';
 
 const INPUT_CLASS = 'w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus:border-sky-400 dark:focus:ring-sky-400/10';
 const TEXTAREA_CLASS = `${INPUT_CLASS} min-h-[120px]`;
@@ -24,6 +25,13 @@ const initialChapterForm = {
   content: ''
 };
 
+const initialBlogForm = {
+  title: '',
+  description: '',
+  coverImage: '',
+  content: ''
+};
+
 function slugifyPreview(value) {
   return value
     .toLowerCase()
@@ -31,6 +39,16 @@ function slugifyPreview(value) {
     .replace(/[^a-z0-9\s-]/g, '')
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-');
+}
+
+function formatDate(date) {
+  if (!date) return 'Not published';
+
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
+  }).format(new Date(date));
 }
 
 function getAuthHeaders() {
@@ -43,25 +61,39 @@ function getAuthHeaders() {
 export default function AdminPage() {
   const [stats, setStats] = useState(null);
   const [books, setBooks] = useState([]);
+  const [blogPosts, setBlogPosts] = useState([]);
   const [bookForm, setBookForm] = useState(initialBookForm);
   const [chapterForm, setChapterForm] = useState(initialChapterForm);
+  const [blogForm, setBlogForm] = useState(initialBlogForm);
   const [editingBookId, setEditingBookId] = useState('');
+  const [editingBlogId, setEditingBlogId] = useState('');
   const [editForm, setEditForm] = useState(initialBookForm);
+  const [editBlogForm, setEditBlogForm] = useState(initialBlogForm);
   const [statsError, setStatsError] = useState('');
   const [bookError, setBookError] = useState('');
   const [chapterError, setChapterError] = useState('');
   const [booksError, setBooksError] = useState('');
+  const [blogError, setBlogError] = useState('');
+  const [blogListError, setBlogListError] = useState('');
   const [bookSuccess, setBookSuccess] = useState('');
   const [chapterSuccess, setChapterSuccess] = useState('');
   const [booksSuccess, setBooksSuccess] = useState('');
+  const [blogSuccess, setBlogSuccess] = useState('');
+  const [blogListSuccess, setBlogListSuccess] = useState('');
   const [loadingStats, setLoadingStats] = useState(true);
   const [loadingBooks, setLoadingBooks] = useState(true);
+  const [loadingBlogs, setLoadingBlogs] = useState(true);
   const [submittingBook, setSubmittingBook] = useState(false);
   const [submittingChapter, setSubmittingChapter] = useState(false);
+  const [submittingBlog, setSubmittingBlog] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [savingBlogEdit, setSavingBlogEdit] = useState(false);
   const [deletingBookId, setDeletingBookId] = useState('');
+  const [deletingBlogId, setDeletingBlogId] = useState('');
 
   const chapterSlugPreview = useMemo(() => slugifyPreview(chapterForm.title || `chapter-${chapterForm.chapterNumber || 'new'}`), [chapterForm.chapterNumber, chapterForm.title]);
+  const blogSlugPreview = useMemo(() => slugifyPreview(blogForm.title || 'new-blog-post'), [blogForm.title]);
+  const editBlogSlugPreview = useMemo(() => slugifyPreview(editBlogForm.title || 'updated-blog-post'), [editBlogForm.title]);
 
   const loadStats = useCallback(async () => {
     setLoadingStats(true);
@@ -98,10 +130,26 @@ export default function AdminPage() {
     }
   }, []);
 
+  const loadBlogs = useCallback(async () => {
+    setLoadingBlogs(true);
+    setBlogListError('');
+
+    try {
+      const { data } = await api.get('/admin/blogs', { headers: getAuthHeaders() });
+      setBlogPosts(data.data || []);
+    } catch (error) {
+      setBlogPosts([]);
+      setBlogListError(error.message || 'Failed to load blog posts.');
+    } finally {
+      setLoadingBlogs(false);
+    }
+  }, []);
+
   useEffect(() => {
     loadStats();
     loadBooks();
-  }, [loadBooks, loadStats]);
+    loadBlogs();
+  }, [loadBlogs, loadBooks, loadStats]);
 
   const handleBookChange = (field, value) => {
     setBookForm((current) => ({ ...current, [field]: value }));
@@ -109,6 +157,10 @@ export default function AdminPage() {
 
   const handleChapterChange = (field, value) => {
     setChapterForm((current) => ({ ...current, [field]: value }));
+  };
+
+  const handleBlogChange = (field, value) => {
+    setBlogForm((current) => ({ ...current, [field]: value }));
   };
 
   const resetBookMessages = () => {
@@ -175,6 +227,34 @@ export default function AdminPage() {
     }
   };
 
+  const submitBlog = async (event) => {
+    event.preventDefault();
+    setBlogError('');
+    setBlogSuccess('');
+
+    try {
+      setSubmittingBlog(true);
+      await api.post(
+        '/admin/blogs',
+        {
+          title: blogForm.title.trim(),
+          description: blogForm.description.trim(),
+          coverImage: blogForm.coverImage.trim(),
+          content: blogForm.content.trim()
+        },
+        { headers: getAuthHeaders() }
+      );
+
+      setBlogSuccess('Blog published successfully and is now live.');
+      setBlogForm(initialBlogForm);
+      await Promise.all([loadStats(), loadBlogs()]);
+    } catch (error) {
+      setBlogError(error.message || 'Failed to publish blog.');
+    } finally {
+      setSubmittingBlog(false);
+    }
+  };
+
   const startEditingBook = (book) => {
     setBooksSuccess('');
     setBooksError('');
@@ -185,6 +265,18 @@ export default function AdminPage() {
       description: book.description || '',
       category: book.category || CATEGORY_OPTIONS[0],
       coverImage: book.coverImage || ''
+    });
+  };
+
+  const startEditingBlog = (post) => {
+    setBlogListSuccess('');
+    setBlogListError('');
+    setEditingBlogId(post._id);
+    setEditBlogForm({
+      title: post.title || '',
+      description: post.description || '',
+      coverImage: post.coverImage || '',
+      content: post.content || ''
     });
   };
 
@@ -215,6 +307,33 @@ export default function AdminPage() {
     }
   };
 
+  const saveBlogEdit = async (blogId) => {
+    setBlogListError('');
+    setBlogListSuccess('');
+
+    try {
+      setSavingBlogEdit(true);
+      await api.put(
+        `/admin/blogs/${blogId}`,
+        {
+          title: editBlogForm.title.trim(),
+          description: editBlogForm.description.trim(),
+          coverImage: editBlogForm.coverImage.trim(),
+          content: editBlogForm.content.trim()
+        },
+        { headers: getAuthHeaders() }
+      );
+
+      setEditingBlogId('');
+      setBlogListSuccess('Blog updated and republished successfully.');
+      await Promise.all([loadStats(), loadBlogs()]);
+    } catch (error) {
+      setBlogListError(error.message || 'Failed to update blog.');
+    } finally {
+      setSavingBlogEdit(false);
+    }
+  };
+
   const deleteBook = async (bookId) => {
     setBooksError('');
     setBooksSuccess('');
@@ -234,13 +353,32 @@ export default function AdminPage() {
     }
   };
 
+  const deleteBlog = async (blogId) => {
+    setBlogListError('');
+    setBlogListSuccess('');
+
+    try {
+      setDeletingBlogId(blogId);
+      await api.delete(`/admin/blogs/${blogId}`, { headers: getAuthHeaders() });
+      setBlogListSuccess('Blog deleted successfully.');
+      if (editingBlogId === blogId) {
+        setEditingBlogId('');
+      }
+      await Promise.all([loadStats(), loadBlogs()]);
+    } catch (error) {
+      setBlogListError(error.message || 'Failed to delete blog.');
+    } finally {
+      setDeletingBlogId('');
+    }
+  };
+
   return (
     <Layout>
       <section className="mb-8 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
           <h1 className="text-3xl font-bold">Admin Dashboard</h1>
           <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
-            Publish readable stories fast, generate chapter slugs automatically, and manage your catalog in one place.
+            Manage books, chapters, and live blog content from one clean publishing workspace.
           </p>
         </div>
       </section>
@@ -248,13 +386,16 @@ export default function AdminPage() {
       {statsError && <p className={ALERT_ERROR_CLASS}>{statsError}</p>}
       {booksError && <p className={ALERT_ERROR_CLASS}>{booksError}</p>}
       {booksSuccess && <p className={ALERT_SUCCESS_CLASS}>{booksSuccess}</p>}
+      {blogListError && <p className={ALERT_ERROR_CLASS}>{blogListError}</p>}
+      {blogListSuccess && <p className={ALERT_SUCCESS_CLASS}>{blogListSuccess}</p>}
 
       {loadingStats ? (
         <p className="mb-6 text-sm text-slate-500 dark:text-slate-300">Loading admin analytics...</p>
       ) : stats ? (
-        <section className="mb-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <section className="mb-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard label="Books" value={stats.totalBooks} />
           <StatCard label="Chapters" value={stats.totalChapters} />
+          <StatCard label="Blogs" value={stats.totalBlogs || 0} />
           <StatCard label="Total Views" value={stats.totalViews} />
         </section>
       ) : (
@@ -360,6 +501,59 @@ export default function AdminPage() {
       </section>
 
       <section className={`${CARD_CLASS} mt-8`}>
+        <div className="mb-4">
+          <h2 className="text-xl font-semibold">Add Blog</h2>
+          <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">Paste the content, review the auto-generated slug, and publish instantly without touching code.</p>
+        </div>
+
+        {blogError && <p className={ALERT_ERROR_CLASS}>{blogError}</p>}
+        {blogSuccess && <p className={ALERT_SUCCESS_CLASS}>{blogSuccess}</p>}
+
+        <form onSubmit={submitBlog} className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
+          <div className="space-y-4">
+            <div>
+              <label className="mb-2 block text-sm font-medium">Title</label>
+              <input className={INPUT_CLASS} type="text" value={blogForm.title} onChange={(event) => handleBlogChange('title', event.target.value)} placeholder="Blog headline" required />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium">Description</label>
+              <textarea className={`${TEXTAREA_CLASS} min-h-[110px]`} value={blogForm.description} onChange={(event) => handleBlogChange('description', event.target.value)} placeholder="Short SEO-friendly summary" required />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium">Cover Image URL</label>
+              <input className={INPUT_CLASS} type="url" value={blogForm.coverImage} onChange={(event) => handleBlogChange('coverImage', event.target.value)} placeholder="https://example.com/blog-cover.jpg" required />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium">Content</label>
+              <textarea className={`${TEXTAREA_CLASS} min-h-[260px]`} value={blogForm.content} onChange={(event) => handleBlogChange('content', event.target.value)} placeholder="Paste blog content here. Use blank lines for new paragraphs." required />
+            </div>
+
+            <button type="submit" disabled={submittingBlog} className="w-full rounded-xl bg-brand-600 px-4 py-2.5 text-white transition hover:bg-brand-500 disabled:cursor-not-allowed disabled:opacity-60">
+              {submittingBlog ? 'Publishing...' : 'Publish Blog'}
+            </button>
+          </div>
+
+          <div className="space-y-4 rounded-3xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900">
+            <div>
+              <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Generated slug</p>
+              <p className="mt-1 break-all text-sm font-semibold text-slate-900 dark:text-white">/blog/{blogSlugPreview || 'new-blog-post'}</p>
+            </div>
+            <div>
+              <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Live preview</p>
+              <div className="mt-3 space-y-3 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-950">
+                <h3 className="text-lg font-semibold">{blogForm.title || 'Your blog title will appear here'}</h3>
+                <p className="text-sm text-slate-600 dark:text-slate-300">{blogForm.description || 'Short description for SEO and the blog card preview.'}</p>
+                <BlogContent content={blogForm.content || 'Paste content here to preview paragraph formatting.'} />
+              </div>
+            </div>
+          </div>
+        </form>
+      </section>
+
+      <section className={`${CARD_CLASS} mt-8`}>
         <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-xl font-semibold">Books List</h2>
@@ -428,6 +622,81 @@ export default function AdminPage() {
                         </>
                       )}
                     </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      <section className={`${CARD_CLASS} mt-8`}>
+        <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-xl font-semibold">Blog Management</h2>
+            <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">Edit, republish, or delete articles. Published updates go live instantly.</p>
+          </div>
+          <span className="text-sm text-slate-500 dark:text-slate-300">{blogPosts.length} total</span>
+        </div>
+
+        {loadingBlogs ? (
+          <p className="text-sm text-slate-500 dark:text-slate-300">Loading blog posts...</p>
+        ) : blogPosts.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-300">
+            No blog posts published yet.
+          </div>
+        ) : (
+          <div className="grid gap-4 xl:grid-cols-2">
+            {blogPosts.map((post) => {
+              const isEditing = editingBlogId === post._id;
+              return (
+                <article key={post._id} className="overflow-hidden rounded-3xl border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900">
+                  <div className="space-y-4 p-4">
+                    <div className="aspect-[16/9] overflow-hidden rounded-2xl bg-slate-200 dark:bg-slate-800">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={isEditing ? editBlogForm.coverImage || post.coverImage : post.coverImage} alt={`${post.title} cover`} className="h-full w-full object-cover" loading="lazy" />
+                    </div>
+
+                    {isEditing ? (
+                      <div className="space-y-3">
+                        <input className={INPUT_CLASS} type="text" value={editBlogForm.title} onChange={(event) => setEditBlogForm((current) => ({ ...current, title: event.target.value }))} placeholder="Blog title" />
+                        <textarea className={`${TEXTAREA_CLASS} min-h-[110px]`} value={editBlogForm.description} onChange={(event) => setEditBlogForm((current) => ({ ...current, description: event.target.value }))} placeholder="Description" />
+                        <input className={INPUT_CLASS} type="url" value={editBlogForm.coverImage} onChange={(event) => setEditBlogForm((current) => ({ ...current, coverImage: event.target.value }))} placeholder="Cover image URL" />
+                        <div className="rounded-2xl border border-dashed border-slate-300 px-4 py-3 text-sm text-slate-600 dark:border-slate-700 dark:text-slate-300">
+                          Generated slug: <span className="font-semibold text-slate-900 dark:text-white">/blog/{editBlogSlugPreview || 'updated-blog-post'}</span>
+                        </div>
+                        <textarea className={`${TEXTAREA_CLASS} min-h-[220px]`} value={editBlogForm.content} onChange={(event) => setEditBlogForm((current) => ({ ...current, content: event.target.value }))} placeholder="Blog content" />
+                        <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-950">
+                          <p className="mb-2 text-sm font-medium text-slate-500 dark:text-slate-400">Content preview</p>
+                          <BlogContent content={editBlogForm.content} />
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <button type="button" onClick={() => saveBlogEdit(post._id)} disabled={savingBlogEdit} className="rounded-full bg-brand-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-500 disabled:opacity-60">
+                            {savingBlogEdit ? 'Publishing...' : 'Save & Publish'}
+                          </button>
+                          <button type="button" onClick={() => setEditingBlogId('')} className="rounded-full border border-slate-300 px-4 py-2 text-sm font-medium dark:border-slate-700">
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="space-y-2">
+                          <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">Published {formatDate(post.publishedAt)}</p>
+                          <h3 className="text-xl font-semibold">{post.title}</h3>
+                          <p className="line-clamp-3 text-sm text-slate-600 dark:text-slate-300">{post.description}</p>
+                          <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Slug: /blog/{post.slug}</p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <button type="button" onClick={() => startEditingBlog(post)} className="rounded-full border border-slate-300 px-4 py-2 text-sm font-medium transition hover:border-brand-400 hover:text-brand-600 dark:border-slate-700 dark:hover:border-sky-400 dark:hover:text-sky-300">
+                            Edit
+                          </button>
+                          <button type="button" onClick={() => deleteBlog(post._id)} disabled={deletingBlogId === post._id} className="rounded-full border border-red-300 px-4 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50 disabled:opacity-60 dark:border-red-400/40 dark:text-red-300 dark:hover:bg-red-500/10">
+                            {deletingBlogId === post._id ? 'Deleting...' : 'Delete'}
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </article>
               );

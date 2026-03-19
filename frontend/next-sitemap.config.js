@@ -23,6 +23,23 @@ async function requestJson(path) {
   return response.json();
 }
 
+
+async function fetchAllBlogPosts() {
+  const posts = [];
+  let page = 1;
+  let totalPages = 1;
+
+  while (page <= totalPages) {
+    const payload = await requestJson(`/blog?page=${page}&limit=100`);
+    posts.push(...(payload.data || []));
+
+    totalPages = payload.pagination?.totalPages || 1;
+    page += 1;
+  }
+
+  return posts;
+}
+
 async function fetchAllBooks() {
   const books = [];
   let page = 1;
@@ -63,9 +80,9 @@ module.exports = {
   },
   additionalPaths: async (config) => {
     try {
-      const books = await fetchAllBooks();
+      const [books, blogPosts] = await Promise.all([fetchAllBooks(), fetchAllBlogPosts()]);
       const categorySet = new Set();
-      const paths = [];
+      const paths = [(await config.transform(config, '/blog'))].filter(Boolean);
 
       for (const book of books) {
         if (!book?.slug) continue;
@@ -91,6 +108,11 @@ module.exports = {
 
       for (const category of categorySet) {
         paths.push(await config.transform(config, `/category/${category}`));
+      }
+
+      for (const post of blogPosts) {
+        if (!post?.slug) continue;
+        paths.push(await config.transform(config, `/blog/${post.slug}`));
       }
 
       return paths.filter(Boolean);

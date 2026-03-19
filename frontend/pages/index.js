@@ -1,12 +1,13 @@
 import Link from 'next/link';
 import Layout from '../components/Layout';
 import BookCard from '../components/BookCard';
+import BlogCard from '../components/BlogCard';
 import SeoHead from '../components/SeoHead';
 import AdSlot from '../components/AdSlot';
 import api from '../utils/api';
 import { buildMeta } from '../utils/seo';
 
-export default function Home({ data, error, categories }) {
+export default function Home({ data, error, categories, latestBlogs }) {
   const meta = buildMeta({
     title: 'ReadNovaX - Read trending novels online',
     description: 'Discover trending books, latest chapters, and immersive reading on ReadNovaX.',
@@ -60,7 +61,7 @@ export default function Home({ data, error, categories }) {
         </>
       )}
 
-      <section>
+      <section className="mb-8">
         <h2 className="mb-4 text-2xl font-bold">Categories</h2>
         <div className="flex flex-wrap gap-3">
           {categories.map((cat) => (
@@ -69,6 +70,29 @@ export default function Home({ data, error, categories }) {
             </Link>
           ))}
         </div>
+      </section>
+
+      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950 sm:p-8">
+        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="mb-2 text-sm font-semibold uppercase tracking-[0.25em] text-brand-600 dark:text-sky-300">Latest Blog</p>
+            <h2 className="text-2xl font-bold">Guides, updates, and reading inspiration</h2>
+            <p className="mt-2 max-w-2xl text-sm text-slate-600 dark:text-slate-300">Explore the newest articles published from the ReadNovaX admin panel—no code deployment required.</p>
+          </div>
+          <Link href="/blog" className="text-sm font-semibold text-brand-600 transition hover:text-brand-500 dark:text-sky-300 dark:hover:text-sky-200">
+            View all posts →
+          </Link>
+        </div>
+
+        {latestBlogs.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-300">
+            Blog posts will appear here after publishing.
+          </div>
+        ) : (
+          <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
+            {latestBlogs.map((post, index) => <BlogCard key={post._id || post.slug} post={post} priority={index < 2} />)}
+          </div>
+        )}
       </section>
     </Layout>
   );
@@ -87,7 +111,10 @@ function Section({ title, books }) {
 
 export async function getServerSideProps() {
   try {
-    const { data } = await api.get('/books/homepage');
+    const [{ data }, { data: latestBlogData }] = await Promise.all([
+      api.get('/books/homepage'),
+      api.get('/blog/latest', { params: { limit: 4 } })
+    ]);
     const categorySet = new Set();
 
     for (const group of [data.featured, data.trending, data.popular]) {
@@ -96,12 +123,13 @@ export async function getServerSideProps() {
       }
     }
 
-    return { props: { data, categories: Array.from(categorySet), error: null } };
+    return { props: { data, categories: Array.from(categorySet), latestBlogs: latestBlogData.data || [], error: null } };
   } catch (error) {
     return {
       props: {
         data: { featured: [], trending: [], popular: [], latestChapters: [] },
         categories: [],
+        latestBlogs: [],
         error: error.message
       }
     };

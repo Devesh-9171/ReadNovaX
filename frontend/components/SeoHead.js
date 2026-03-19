@@ -1,6 +1,6 @@
 import Head from 'next/head';
 
-export default function SeoHead({ title, description, image, url, structuredData, noIndex = false }) {
+export default function SeoHead({ title, description, image, url, structuredData, noIndex = false, type = 'website' }) {
   return (
     <Head>
       <title>{title}</title>
@@ -13,7 +13,7 @@ export default function SeoHead({ title, description, image, url, structuredData
       <meta property="og:description" content={description} />
       <meta property="og:image" content={image} />
       <meta property="og:url" content={url} />
-      <meta property="og:type" content="website" />
+      <meta property="og:type" content={type} />
       <meta property="og:site_name" content="ReadNovaX" />
       <meta name="twitter:card" content="summary_large_image" />
       <meta name="twitter:title" content={title} />
