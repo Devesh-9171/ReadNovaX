@@ -6,6 +6,8 @@ const auth = require('../middleware/auth');
 const router = express.Router();
 
 router.post('/', authMiddleware, requireAdmin, controller.createBook);
+router.put('/:id', authMiddleware, requireAdmin, controller.updateBook);
+router.delete('/:id', authMiddleware, requireAdmin, controller.deleteBook);
 router.get('/homepage', controller.getHomepage);
 router.get('/', controller.getBooks);
 router.get('/category/:slug', controller.getCategoryBooks);

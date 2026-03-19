@@ -1,5 +1,5 @@
-import ChapterReaderPage from '../../../components/ChapterReaderPage';
-import api from '../../../utils/api';
+import ChapterReaderPage from '../../components/ChapterReaderPage';
+import api from '../../utils/api';
 
 export default ChapterReaderPage;
 
