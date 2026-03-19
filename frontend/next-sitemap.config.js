@@ -1,5 +1,4 @@
-const DEFAULT_SITE_URL = "https://read-nova-x-frontend.vercel.app";
-const siteUrl = process.env.SITE_URL || process.env.NEXT_PUBLIC_SITE_URL || DEFAULT_SITE_URL;
+const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || 'https://readnovax.in').replace(/\/$/, '');
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://readnovax.onrender.com/api';
 
 function getValidatedApiBaseUrl() {
@@ -22,7 +21,6 @@ async function requestJson(path) {
 
   return response.json();
 }
-
 
 async function fetchAllBlogPosts() {
   const posts = [];
@@ -57,7 +55,7 @@ async function fetchAllBooks() {
 }
 
 module.exports = {
-  siteUrl,
+  siteUrl: SITE_URL,
   outDir: 'public',
   generateRobotsTxt: true,
   sitemapSize: 7000,
@@ -79,46 +77,53 @@ module.exports = {
     };
   },
   additionalPaths: async (config) => {
-    try {
-      const [books, blogPosts] = await Promise.all([fetchAllBooks(), fetchAllBlogPosts()]);
-      const categorySet = new Set();
-      const paths = [(await config.transform(config, '/blog'))].filter(Boolean);
+    const dynamicResults = await Promise.allSettled([fetchAllBooks(), fetchAllBlogPosts()]);
+    const [booksResult, blogPostsResult] = dynamicResults;
 
-      for (const book of books) {
-        if (!book?.slug) continue;
-
-        paths.push(await config.transform(config, `/books/${book.slug}`));
-
-        if (book.category) {
-          categorySet.add(book.category);
-        }
-
-        try {
-          const bookPayload = await requestJson(`/books/${book.slug}`);
-          const chapters = bookPayload.chapters || [];
-
-          for (const chapter of chapters) {
-            if (!chapter?.slug) continue;
-            paths.push(await config.transform(config, `/books/${book.slug}/${chapter.slug}`));
-          }
-        } catch (error) {
-          console.warn(`[next-sitemap] Skipping chapters for ${book.slug}: ${error.message}`);
-        }
-      }
-
-      for (const category of categorySet) {
-        paths.push(await config.transform(config, `/category/${category}`));
-      }
-
-      for (const post of blogPosts) {
-        if (!post?.slug) continue;
-        paths.push(await config.transform(config, `/blog/${post.slug}`));
-      }
-
-      return paths.filter(Boolean);
-    } catch (error) {
-      console.warn(`[next-sitemap] Unable to fetch dynamic routes: ${error.message}`);
-      return [];
+    if (booksResult.status === 'rejected') {
+      console.warn(`[next-sitemap] Unable to fetch books: ${booksResult.reason.message}`);
     }
+
+    if (blogPostsResult.status === 'rejected') {
+      console.warn(`[next-sitemap] Unable to fetch blog posts: ${blogPostsResult.reason.message}`);
+    }
+
+    const books = booksResult.status === 'fulfilled' ? booksResult.value : [];
+    const blogPosts = blogPostsResult.status === 'fulfilled' ? blogPostsResult.value : [];
+    const categorySet = new Set();
+    const paths = [(await config.transform(config, '/blog'))].filter(Boolean);
+
+    for (const book of books) {
+      if (!book?.slug) continue;
+
+      paths.push(await config.transform(config, `/books/${book.slug}`));
+
+      if (book.category) {
+        categorySet.add(book.category);
+      }
+
+      try {
+        const bookPayload = await requestJson(`/books/${book.slug}`);
+        const chapters = bookPayload.chapters || [];
+
+        for (const chapter of chapters) {
+          if (!chapter?.slug) continue;
+          paths.push(await config.transform(config, `/books/${book.slug}/${chapter.slug}`));
+        }
+      } catch (error) {
+        console.warn(`[next-sitemap] Skipping chapters for ${book.slug}: ${error.message}`);
+      }
+    }
+
+    for (const category of categorySet) {
+      paths.push(await config.transform(config, `/category/${category}`));
+    }
+
+    for (const post of blogPosts) {
+      if (!post?.slug) continue;
+      paths.push(await config.transform(config, `/blog/${post.slug}`));
+    }
+
+    return paths.filter(Boolean);
   }
 };
