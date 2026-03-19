@@ -50,7 +50,7 @@ npm install
 npm run dev
 ```
 
-Frontend: `https://read-nova-x-frontend.vercel.app`  
+Frontend: `https://readnovax.in`  
 Backend: `https://readnovax.onrender.com`
 
 ## Deployment

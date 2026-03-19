@@ -9,7 +9,7 @@
 
 ### Frontend
 - `NEXT_PUBLIC_API_URL=https://readnovax.onrender.com`
-- `NEXT_PUBLIC_SITE_URL=https://www.yourdomain.com`
+- `NEXT_PUBLIC_SITE_URL=https://readnovax.in`
 - `NEXT_PUBLIC_GA_ID=G-XXXXXXXXXX`
 - `NEXT_PUBLIC_ADSENSE_CLIENT=ca-pub-xxxxxxxxxxxxxxxx`
 
