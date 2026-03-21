@@ -1,5 +1,6 @@
 const slugify = require('slugify');
 const crypto = require('crypto');
+const mongoose = require('mongoose');
 const Book = require('../models/Book');
 const Chapter = require('../models/Chapter');
 const asyncHandler = require('../utils/asyncHandler');
@@ -41,12 +42,20 @@ async function resolveGroupId(groupId) {
     return crypto.randomUUID();
   }
 
+  if (!mongoose.Types.ObjectId.isValid(groupId)) {
+    return String(groupId).trim();
+  }
+
   const existing = await Book.findById(groupId).select('groupId').lean();
   if (existing?.groupId) {
     return existing.groupId;
   }
 
   return String(groupId).trim();
+}
+
+function shouldRequireExistingGroup(language) {
+  return normalizeLanguage(language, DEFAULT_LANGUAGE) !== DEFAULT_LANGUAGE;
 }
 
 function selectPreferredBooks(books, preferredLanguage = 'en') {
@@ -170,6 +179,10 @@ exports.createBook = asyncHandler(async (req, res) => {
     throw new AppError('title, category, description, and coverImage are required', 400);
   }
 
+  if (shouldRequireExistingGroup(normalizedLanguage) && !groupId) {
+    throw new AppError('Translated books must be linked to an existing translation group', 400);
+  }
+
   const nextGroupId = await resolveGroupId(groupId);
   const duplicateLanguage = await Book.findOne({ groupId: nextGroupId, language: normalizedLanguage }).lean();
   if (duplicateLanguage) {
@@ -275,10 +288,14 @@ exports.getHomepage = asyncHandler(async (req, res) => {
 });
 
 exports.getBooks = asyncHandler(async (req, res) => {
-  const { search = '', category, sort = 'updatedAt', lang = DEFAULT_LANGUAGE } = req.query;
+  const { search = '', category, sort = 'updatedAt', lang = DEFAULT_LANGUAGE, includeAllLanguages } = req.query;
   const preferredLanguage = normalizeLanguage(lang, DEFAULT_LANGUAGE);
-  const { page, limit } = getPagination(req.query, { defaultLimit: 12, maxLimit: 20 });
   const query = {};
+  const shouldIncludeAllLanguages = String(includeAllLanguages).toLowerCase() === 'true';
+  const { page, limit } = getPagination(req.query, {
+    defaultLimit: shouldIncludeAllLanguages ? 100 : 12,
+    maxLimit: shouldIncludeAllLanguages ? 500 : 20
+  });
 
   if (category) query.category = category;
   if (search) {
@@ -293,13 +310,29 @@ exports.getBooks = asyncHandler(async (req, res) => {
     rating: { rating: -1 }
   };
 
-  const { books, total } = await getPaginatedBookResults({
-    query,
-    sort: sortMap[sort] || sortMap.updatedAt,
-    page,
-    limit,
-    preferredLanguage
-  });
+  const resolvedSort = sortMap[sort] || sortMap.updatedAt;
+  let books;
+  let total;
+
+  if (shouldIncludeAllLanguages) {
+    [books, total] = await Promise.all([
+      Book.find(query)
+        .sort({ ...resolvedSort, title: 1, language: 1, _id: 1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .select('title slug author category coverImage rating totalViews language groupId updatedAt')
+        .lean(),
+      Book.countDocuments(query)
+    ]);
+  } else {
+    ({ books, total } = await getPaginatedBookResults({
+      query,
+      sort: resolvedSort,
+      page,
+      limit,
+      preferredLanguage
+    }));
+  }
 
   res.json({ success: true, data: books, pagination: buildPaginationMeta({ total, page, limit }) });
 });
