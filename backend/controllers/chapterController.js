@@ -5,6 +5,7 @@ const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
 const { cache, cacheKey } = require('../utils/cache');
 const { DEFAULT_LANGUAGE, normalizeLanguage } = require('../utils/language');
+const { applySharedSlugToBooks } = require('../utils/bookSlug');
 
 
 exports.createChapter = asyncHandler(async (req, res) => {
@@ -81,13 +82,16 @@ exports.getChapter = asyncHandler(async (req, res) => {
     Book.find({ groupId: book.groupId || String(book._id) }).sort({ language: 1 }).select('title slug language groupId').lean()
   ]);
 
+  const [sharedBook] = await applySharedSlugToBooks([{ ...book, trendingScore: nextTrendingScore }]);
+  const sharedTranslations = await applySharedSlugToBooks(translations);
+
   const payload = {
-    book: { ...book, trendingScore: nextTrendingScore },
+    book: sharedBook || { ...book, trendingScore: nextTrendingScore },
     chapter,
     chapters,
     previousChapter,
     nextChapter,
-    translations,
+    translations: sharedTranslations,
     chapterNumber: chapter.chapterNumber
   };
   cache.set(key, payload, 30);

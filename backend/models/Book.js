@@ -4,7 +4,7 @@ const { DEFAULT_LANGUAGE, SUPPORTED_LANGUAGES } = require('../utils/language');
 const bookSchema = new mongoose.Schema(
   {
     title: { type: String, required: true, trim: true },
-    slug: { type: String, required: true, unique: true, index: true },
+    slug: { type: String, required: true, index: true },
     author: { type: String, required: true, trim: true },
     category: {
       type: String,

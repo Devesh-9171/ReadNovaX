@@ -2,6 +2,7 @@ const Book = require('../models/Book');
 const Chapter = require('../models/Chapter');
 const BlogPost = require('../models/BlogPost');
 const asyncHandler = require('../utils/asyncHandler');
+const { getSharedSlugMap } = require('../utils/bookSlug');
 
 exports.getSitemapPayload = asyncHandler(async (_req, res) => {
   const [books, chapters, blogPosts] = await Promise.all([
@@ -32,12 +33,14 @@ exports.getSitemapPayload = asyncHandler(async (_req, res) => {
     chaptersByBookId.set(key, existing);
   }
 
+  const sharedSlugMap = await getSharedSlugMap(books.map((book) => book.groupId || String(book._id)));
+
   const payload = {
     success: true,
     generatedAt: new Date().toISOString(),
     books: books.map((book) => ({
       id: String(book._id),
-      slug: book.slug,
+      slug: sharedSlugMap.get(book.groupId || String(book._id)) || book.slug,
       language: book.language,
       groupId: book.groupId || String(book._id),
       updatedAt: book.updatedAt,
