@@ -14,11 +14,15 @@ const DEFAULT_SETTINGS = {
   theme: 'light'
 };
 
-function getChapterHref(bookSlug, chapterSlug) {
-  return `/${bookSlug}/${chapterSlug}`;
+function buildBookHref(book) {
+  return `/book/${book.slug}${book.language === 'hi' ? '?lang=hi' : ''}`;
 }
 
-export default function ChapterReaderPage({ book, chapter, chapters = [], previousChapter, nextChapter, isFallback }) {
+function getChapterHref(book, chapterSlug) {
+  return `/book/${book.slug}/${chapterSlug}${book.language === 'hi' ? '?lang=hi' : ''}`;
+}
+
+export default function ChapterReaderPage({ book, chapter, chapters = [], previousChapter, nextChapter, translations = [], isFallback }) {
   const router = useRouter();
   const sentinelRef = useRef(null);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
@@ -142,7 +146,7 @@ export default function ChapterReaderPage({ book, chapter, chapters = [], previo
           <p className="mt-3 text-slate-600 dark:text-slate-300">
             {isFallback ? 'The reading server is waking up, so we are keeping the page stable until content is ready.' : 'We could not load this chapter yet.'}
           </p>
-          <Link href={book ? `/books/${book.slug}` : '/'} className="mt-5 inline-flex rounded-full bg-brand-600 px-5 py-2.5 text-white transition hover:bg-brand-500">
+          <Link href={book ? buildBookHref(book) : '/'} className="mt-5 inline-flex rounded-full bg-brand-600 px-5 py-2.5 text-white transition hover:bg-brand-500">
             Browse another page
           </Link>
         </div>
@@ -171,14 +175,16 @@ export default function ChapterReaderPage({ book, chapter, chapters = [], previo
     title: `${book.title} - ${chapter.title} | ReadNovaX`,
     description: chapter.content.slice(0, 150),
     image: book.coverImage,
-    path: getChapterHref(book.slug, chapter.slug)
+    path: `/book/${book.slug}/${chapter.slug}${book.language === 'hi' ? '?lang=hi' : ''}`
   });
 
   const articleFontClass = settings.fontFamily === 'serif' ? 'font-[Georgia,_Cambria,_Times_New_Roman,_serif]' : 'font-[Inter,_system-ui,_sans-serif]';
 
   const handleJumpToChapter = (chapterSlug) => {
-    router.push(getChapterHref(book.slug, chapterSlug));
+    router.push(getChapterHref(book, chapterSlug));
   };
+
+  const showLanguageSwitch = translations.length > 1;
 
   return (
     <Layout>
@@ -198,7 +204,7 @@ export default function ChapterReaderPage({ book, chapter, chapters = [], previo
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-brand-600 dark:text-sky-300">Chapter reading</p>
           <div className="mt-3 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <Link href={`/books/${book.slug}`} className="text-sm text-slate-500 transition hover:text-brand-600 dark:text-slate-400 dark:hover:text-sky-300">
+              <Link href={buildBookHref(book)} className="text-sm text-slate-500 transition hover:text-brand-600 dark:text-slate-400 dark:hover:text-sky-300">
                 ← Back to {book.title}
               </Link>
               <h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">{chapter.title}</h1>
@@ -206,8 +212,23 @@ export default function ChapterReaderPage({ book, chapter, chapters = [], previo
                 Chapter {chapter.chapterNumber} · {book.author}
               </p>
             </div>
-            <div className="rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-600 dark:bg-slate-900 dark:text-slate-300">
-              {Math.round(progress)}% read
+            <div className="flex flex-col items-end gap-3">
+              {showLanguageSwitch ? (
+                <div className="inline-flex rounded-full border border-slate-300 bg-white p-1 text-sm font-semibold dark:border-slate-700 dark:bg-slate-900">
+                  {translations.map((translation) => {
+                    const href = `/book/${book.slug}/${chapter.slug}${translation.language === 'hi' ? '?lang=hi' : ''}`;
+                    const active = translation.language === book.language;
+                    return (
+                      <Link key={translation.language} href={href} className={`rounded-full px-3 py-1.5 uppercase ${active ? 'bg-brand-600 text-white dark:bg-sky-400 dark:text-slate-950' : 'text-slate-600 dark:text-slate-300'}`}>
+                        {translation.language}
+                      </Link>
+                    );
+                  })}
+                </div>
+              ) : null}
+              <div className="rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-600 dark:bg-slate-900 dark:text-slate-300">
+                {Math.round(progress)}% read
+              </div>
             </div>
           </div>
         </div>
@@ -232,8 +253,8 @@ export default function ChapterReaderPage({ book, chapter, chapters = [], previo
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">ReadNovaX edition</p>
               <h2 className="mt-2 text-2xl font-semibold">{book.title}</h2>
             </div>
-            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600 dark:bg-slate-900 dark:text-slate-300">
-              {paragraphs.length} sections
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium uppercase text-slate-600 dark:bg-slate-900 dark:text-slate-300">
+              {book.language}
             </span>
           </div>
 
@@ -244,9 +265,6 @@ export default function ChapterReaderPage({ book, chapter, chapters = [], previo
             {displayedParagraphs.map((paragraph, index) => (
               <div key={`${chapter._id}-${index}`}>
                 <p className="reader-paragraph">{paragraph}</p>
-                {(index + 1) % 4 === 0 && index + 1 !== displayedParagraphs.length && (
-                  <AdSlot label="Reader sponsor spot" className="my-8 rounded-2xl bg-slate-50/80 dark:bg-slate-900/70" />
-                )}
               </div>
             ))}
           </div>
@@ -258,24 +276,27 @@ export default function ChapterReaderPage({ book, chapter, chapters = [], previo
           )}
         </article>
 
-        <div className="mx-auto mt-6 grid max-w-[700px] gap-3 sm:grid-cols-2">
-          {previousChapter ? (
-            <Link href={getChapterHref(book.slug, previousChapter.slug)} className="rounded-2xl border border-slate-300 bg-white px-4 py-4 text-sm font-medium text-slate-700 transition hover:border-brand-400 hover:text-brand-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:border-sky-400 dark:hover:text-sky-300">
-              <span className="block text-xs uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">Previous chapter</span>
-              <span className="mt-1 block">{previousChapter.title}</span>
-            </Link>
-          ) : (
-            <div className="rounded-2xl border border-dashed border-slate-300 px-4 py-4 text-sm text-slate-400 dark:border-slate-700">You are at the beginning.</div>
-          )}
+        <div className="mx-auto mt-6 max-w-[700px]">
+          <AdSlot label="Reader sponsor spot" className="mb-4" />
+          <div className="grid gap-3 sm:grid-cols-2">
+            {previousChapter ? (
+              <Link href={getChapterHref(book, previousChapter.slug)} className="rounded-2xl border border-slate-300 bg-white px-4 py-4 text-sm font-medium text-slate-700 transition hover:border-brand-400 hover:text-brand-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:border-sky-400 dark:hover:text-sky-300">
+                <span className="block text-xs uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">Previous chapter</span>
+                <span className="mt-1 block">{previousChapter.title}</span>
+              </Link>
+            ) : (
+              <div className="rounded-2xl border border-dashed border-slate-300 px-4 py-4 text-sm text-slate-400 dark:border-slate-700">You are at the beginning.</div>
+            )}
 
-          {nextChapter ? (
-            <Link href={getChapterHref(book.slug, nextChapter.slug)} className="rounded-2xl bg-brand-600 px-4 py-4 text-sm font-medium text-white transition hover:bg-brand-500 dark:bg-sky-500 dark:text-slate-950 dark:hover:bg-sky-400">
-              <span className="block text-xs uppercase tracking-[0.2em] text-white/80 dark:text-slate-900/80">Next chapter</span>
-              <span className="mt-1 block">{nextChapter.title}</span>
-            </Link>
-          ) : (
-            <div className="rounded-2xl border border-dashed border-slate-300 px-4 py-4 text-sm text-slate-400 dark:border-slate-700">You reached the latest chapter.</div>
-          )}
+            {nextChapter ? (
+              <Link href={getChapterHref(book, nextChapter.slug)} className="rounded-2xl bg-brand-600 px-4 py-4 text-sm font-medium text-white transition hover:bg-brand-500 dark:bg-sky-500 dark:text-slate-950 dark:hover:bg-sky-400">
+                <span className="block text-xs uppercase tracking-[0.2em] text-white/80 dark:text-slate-900/80">Next chapter</span>
+                <span className="mt-1 block">{nextChapter.title}</span>
+              </Link>
+            ) : (
+              <div className="rounded-2xl border border-dashed border-slate-300 px-4 py-4 text-sm text-slate-400 dark:border-slate-700">You reached the latest chapter.</div>
+            )}
+          </div>
         </div>
       </div>
     </Layout>

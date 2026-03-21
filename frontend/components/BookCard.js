@@ -1,6 +1,11 @@
 import Image from 'next/image';
 import Link from 'next/link';
 
+const LANGUAGE_LABELS = {
+  en: 'EN',
+  hi: 'HI'
+};
+
 export default function BookCard({ book, priority = false }) {
   return (
     <article className="overflow-hidden rounded-xl border bg-white shadow-sm transition hover:-translate-y-1 dark:border-slate-800 dark:bg-slate-900">
@@ -16,14 +21,19 @@ export default function BookCard({ book, priority = false }) {
         />
       </div>
       <div className="space-y-2 p-4">
-        <h3 className="line-clamp-1 font-semibold">{book.title}</h3>
+        <div className="flex items-start justify-between gap-3">
+          <h3 className="line-clamp-1 font-semibold">{book.title}</h3>
+          <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:bg-slate-800 dark:text-slate-300">
+            {LANGUAGE_LABELS[book.language] || 'EN'}
+          </span>
+        </div>
         <p className="text-sm text-slate-500">{book.author}</p>
         <div className="flex items-center justify-between text-xs text-slate-500">
           <span className="rounded bg-slate-100 px-2 py-1 capitalize dark:bg-slate-800">{book.category}</span>
           <span>⭐ {book.rating}</span>
         </div>
         <p className="text-xs text-slate-500">{book.totalViews.toLocaleString()} reads</p>
-        <Link href={`/books/${book.slug}`} className="block rounded bg-brand-600 px-3 py-2 text-center text-sm font-semibold text-white">
+        <Link href={`/book/${book.slug}${book.language === 'hi' ? '?lang=hi' : ''}`} className="block rounded bg-brand-600 px-3 py-2 text-center text-sm font-semibold text-white">
           Read Now
         </Link>
       </div>

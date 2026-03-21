@@ -72,7 +72,7 @@ export default function BlogPostPage({ post, isFallback }) {
         </div>
 
         <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950 sm:p-8">
-          <BlogContent content={post.content} />
+          <BlogContent content={post.content} html={post.contentHtml} />
         </div>
       </article>
     </Layout>

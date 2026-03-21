@@ -22,9 +22,12 @@ const api = axios.create({
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    const rawMessage = error?.response?.data?.message || error.message || 'Request failed';
     const message = error?.code === 'ECONNABORTED'
       ? 'The server is taking longer than expected. Please try again.'
-      : error?.response?.data?.message || error.message || 'Request failed';
+      : /^Unauthorized:/i.test(rawMessage)
+        ? 'Please login to continue.'
+        : rawMessage;
 
     const normalizedError = new Error(message);
     normalizedError.status = error?.response?.status;
