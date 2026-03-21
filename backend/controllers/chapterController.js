@@ -7,7 +7,6 @@ const { cache, cacheKey } = require('../utils/cache');
 const { DEFAULT_LANGUAGE, normalizeLanguage } = require('../utils/language');
 const { applySharedSlugToBooks } = require('../utils/bookSlug');
 
-
 exports.createChapter = asyncHandler(async (req, res) => {
   const { bookId, chapterNumber, title, content } = req.body;
 
@@ -75,15 +74,41 @@ exports.getChapter = asyncHandler(async (req, res) => {
   const nextTrendingScore = book.viewsLast24h * 3 + book.viewsLast7d * 2 + book.totalViews;
   await Book.updateOne({ _id: book._id }, { $set: { trendingScore: nextTrendingScore } });
 
-  const [previousChapter, nextChapter, chapters, translations] = await Promise.all([
+  const translationBooks = await Book.find({ groupId: book.groupId || String(book._id) })
+    .sort({ language: 1 })
+    .select('title slug language groupId')
+    .lean();
+
+  const translationChapterDocs = await Chapter.find({
+    bookId: { $in: translationBooks.map((translationBook) => translationBook._id) },
+    chapterNumber: chapter.chapterNumber
+  })
+    .select('bookId slug chapterNumber updatedAt')
+    .lean();
+
+  const chapterByBookId = new Map(translationChapterDocs.map((translationChapter) => [String(translationChapter.bookId), translationChapter]));
+
+  const [previousChapter, nextChapter, chapters] = await Promise.all([
     Chapter.findOne({ bookId: book._id, chapterNumber: chapter.chapterNumber - 1 }).select('title slug chapterNumber').lean(),
     Chapter.findOne({ bookId: book._id, chapterNumber: chapter.chapterNumber + 1 }).select('title slug chapterNumber').lean(),
-    Chapter.find({ bookId: book._id }).sort({ chapterNumber: 1 }).select('title slug chapterNumber').lean(),
-    Book.find({ groupId: book.groupId || String(book._id) }).sort({ language: 1 }).select('title slug language groupId').lean()
+    Chapter.find({ bookId: book._id }).sort({ chapterNumber: 1 }).select('title slug chapterNumber').lean()
   ]);
 
   const [sharedBook] = await applySharedSlugToBooks([{ ...book, trendingScore: nextTrendingScore }]);
-  const sharedTranslations = await applySharedSlugToBooks(translations);
+  const sharedTranslations = await applySharedSlugToBooks(translationBooks);
+  const chapterTranslations = sharedTranslations
+    .map((translation) => {
+      const translatedChapter = chapterByBookId.get(String(translation._id));
+      if (!translatedChapter) return null;
+      return {
+        language: translation.language,
+        bookSlug: translation.slug,
+        chapterSlug: translatedChapter.slug,
+        chapterNumber: translatedChapter.chapterNumber,
+        updatedAt: translatedChapter.updatedAt
+      };
+    })
+    .filter(Boolean);
 
   const payload = {
     book: sharedBook || { ...book, trendingScore: nextTrendingScore },
@@ -92,6 +117,7 @@ exports.getChapter = asyncHandler(async (req, res) => {
     previousChapter,
     nextChapter,
     translations: sharedTranslations,
+    chapterTranslations,
     chapterNumber: chapter.chapterNumber
   };
   cache.set(key, payload, 30);

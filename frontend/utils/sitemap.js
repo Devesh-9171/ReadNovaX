@@ -4,7 +4,8 @@ import path from 'path';
 const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || 'https://readnovax.in').replace(/\/$/, '');
 const DEFAULT_API_BASE_URL = 'https://readnovax.onrender.com/api';
 const SITEMAP_FETCH_TIMEOUT_MS = 45000;
-const SITEMAP_RETRY_DELAYS_MS = [0, 1500, 3000];
+const SITEMAP_RETRY_DELAYS_MS = [0, 1500, 3000, 5000];
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 const STATIC_ROUTE_FILES = [
   { path: '/', file: 'pages/index.js' },
@@ -32,8 +33,10 @@ function wait(ms) {
 }
 
 function normalizeIsoDate(value, fallback = new Date()) {
-  const date = value ? new Date(value) : fallback;
-  return Number.isNaN(date.getTime()) ? fallback.toISOString() : date.toISOString();
+  const fallbackDate = fallback instanceof Date ? fallback : new Date(fallback);
+  const date = value ? new Date(value) : fallbackDate;
+  const resolvedDate = Number.isNaN(date.getTime()) ? fallbackDate : date;
+  return resolvedDate.toISOString();
 }
 
 function xmlEscape(value) {
@@ -105,12 +108,33 @@ async function fetchJsonWithRetry(requestPath) {
   throw new Error(`Unable to fetch runtime sitemap data: ${lastError?.message || 'Unknown error'}`);
 }
 
+function buildAlternateLinks(variants, routeBuilder) {
+  const alternates = [];
+  const seen = new Set();
+
+  for (const variant of variants) {
+    const hreflang = variant.language === 'hi' ? 'hi' : 'en';
+    const href = buildAbsoluteUrl(routeBuilder(variant), variant.language);
+    const key = `${hreflang}:${href}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    alternates.push({ hreflang, href });
+  }
+
+  const xDefaultHref = alternates.find((alternate) => alternate.hreflang === 'en')?.href || alternates[0]?.href;
+  if (xDefaultHref && !seen.has(`x-default:${xDefaultHref}`)) {
+    alternates.push({ hreflang: 'x-default', href: xDefaultHref });
+  }
+
+  return alternates;
+}
+
 function createUrlEntry({ loc, lastmod, alternates = [] }) {
   return [
     '  <url>',
     `    <loc>${xmlEscape(loc)}</loc>`,
-    ...alternates.map((alternate) => `    <xhtml:link rel="alternate" hreflang="${xmlEscape(alternate.hreflang)}" href="${xmlEscape(alternate.href)}" />`),
     `    <lastmod>${xmlEscape(lastmod)}</lastmod>`,
+    ...alternates.map((alternate) => `    <xhtml:link rel="alternate" hreflang="${xmlEscape(alternate.hreflang)}" href="${xmlEscape(alternate.href)}" />`),
     '  </url>'
   ].join('\n');
 }
@@ -124,36 +148,121 @@ function buildSitemapDocument(entries) {
   ].join('\n');
 }
 
-function buildAlternateLinks(variants, routeBuilder) {
-  return variants.map((variant) => ({
-    hreflang: variant.language === 'hi' ? 'hi' : 'en',
-    href: buildAbsoluteUrl(routeBuilder(variant), variant.language)
-  }));
-}
-
 function getGroupSharedSlug(variants) {
   const englishVariant = variants.find((variant) => variant.language === 'en' && variant.slug);
   return englishVariant?.slug || variants[0]?.slug;
 }
 
-export async function buildSitemapXml() {
-  const payload = await fetchJsonWithRetry('/sitemap');
-  const generatedAt = normalizeIsoDate(payload.generatedAt);
-  const books = Array.isArray(payload.books) ? payload.books : [];
-  const blogPosts = Array.isArray(payload.blogPosts) ? payload.blogPosts : [];
+function getValidLanguage(value) {
+  return value === 'hi' ? 'hi' : 'en';
+}
 
-  const entries = [];
+function getMaxIsoDate(values, fallback) {
+  const normalized = values
+    .map((value) => normalizeIsoDate(value, fallback))
+    .filter((value) => ISO_DATE_PATTERN.test(value))
+    .sort();
 
-  for (const route of STATIC_ROUTE_FILES) {
-    entries.push(createUrlEntry({
-      loc: buildAbsoluteUrl(route.path),
-      lastmod: getStaticRouteLastmod(route.file, generatedAt)
-    }));
+  return normalized[normalized.length - 1] || normalizeIsoDate(fallback);
+}
+
+function isValidSlug(value) {
+  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(String(value || '').trim());
+}
+
+function createStaticEntries(generatedAt) {
+  return STATIC_ROUTE_FILES.map((route) => createUrlEntry({
+    loc: buildAbsoluteUrl(route.path),
+    lastmod: getStaticRouteLastmod(route.file, generatedAt)
+  }));
+}
+
+function dedupeAndSortEntries(rawEntries = []) {
+  const seen = new Set();
+  return rawEntries
+    .filter(Boolean)
+    .sort((left, right) => left.loc.localeCompare(right.loc))
+    .filter((entry) => {
+      if (!entry.loc || seen.has(entry.loc)) {
+        return false;
+      }
+      seen.add(entry.loc);
+      return true;
+    });
+}
+
+export function validateSitemapXml(xml) {
+  if (typeof xml !== 'string' || !xml.trim()) {
+    throw new Error('Sitemap XML is empty');
   }
 
+  if (!xml.startsWith('<?xml version="1.0" encoding="UTF-8"?>')) {
+    throw new Error('Sitemap XML declaration is missing or invalid');
+  }
+
+  if (!xml.includes('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">')) {
+    throw new Error('Sitemap root element or namespaces are invalid');
+  }
+
+  if (!xml.trim().endsWith('</urlset>')) {
+    throw new Error('Sitemap root element is not properly closed');
+  }
+
+  const urlBlocks = xml.match(/<url>[\s\S]*?<\/url>/g) || [];
+  if (!urlBlocks.length) {
+    throw new Error('Sitemap must contain at least one URL entry');
+  }
+
+  const seenLocs = new Set();
+  for (const block of urlBlocks) {
+    const locMatch = block.match(/<loc>([^<]+)<\/loc>/);
+    const lastmodMatch = block.match(/<lastmod>([^<]+)<\/lastmod>/);
+    if (!locMatch) {
+      throw new Error('A sitemap URL entry is missing <loc>');
+    }
+    if (!lastmodMatch) {
+      throw new Error('A sitemap URL entry is missing <lastmod>');
+    }
+
+    const loc = locMatch[1];
+    const lastmod = lastmodMatch[1];
+    if (seenLocs.has(loc)) {
+      throw new Error(`Duplicate sitemap URL detected: ${loc}`);
+    }
+    seenLocs.add(loc);
+
+    try {
+      new URL(loc);
+    } catch {
+      throw new Error(`Invalid sitemap URL detected: ${loc}`);
+    }
+
+    if (!ISO_DATE_PATTERN.test(lastmod)) {
+      throw new Error(`Invalid sitemap lastmod detected: ${lastmod}`);
+    }
+  }
+
+  return true;
+}
+
+function createDynamicEntries(payload = {}, generatedAt = new Date().toISOString()) {
+  const books = Array.isArray(payload.books) ? payload.books : [];
+  const blogPosts = Array.isArray(payload.blogPosts) ? payload.blogPosts : [];
+  const dynamicEntries = [];
+
   const booksByGroupId = new Map();
-  for (const book of books) {
-    const groupId = book.groupId || book.id;
+  for (const rawBook of books) {
+    const slug = String(rawBook?.slug || '').trim();
+    if (!isValidSlug(slug)) continue;
+
+    const book = {
+      ...rawBook,
+      slug,
+      language: getValidLanguage(rawBook?.language),
+      groupId: rawBook?.groupId || rawBook?.id || slug,
+      chapters: Array.isArray(rawBook?.chapters) ? rawBook.chapters : []
+    };
+    const groupId = book.groupId;
     const variants = booksByGroupId.get(groupId) || [];
     variants.push(book);
     booksByGroupId.set(groupId, variants);
@@ -161,49 +270,93 @@ export async function buildSitemapXml() {
 
   for (const variants of booksByGroupId.values()) {
     const sharedSlug = getGroupSharedSlug(variants);
+    if (!isValidSlug(sharedSlug)) continue;
+
     const bookAlternates = buildAlternateLinks(variants, () => `/book/${sharedSlug}`);
+    const bookLastmod = getMaxIsoDate(
+      variants.flatMap((book) => [book.updatedAt, book.latestContentUpdatedAt]),
+      generatedAt
+    );
 
     for (const book of variants) {
-      entries.push(createUrlEntry({
+      dynamicEntries.push({
         loc: buildAbsoluteUrl(`/book/${sharedSlug}`, book.language),
         alternates: bookAlternates,
-        lastmod: normalizeIsoDate(book.updatedAt, new Date(generatedAt))
-      }));
+        lastmod: bookLastmod
+      });
     }
 
     const chaptersByNumber = new Map();
     for (const book of variants) {
-      for (const chapter of book.chapters || []) {
-        const chapterVariants = chaptersByNumber.get(chapter.chapterNumber) || [];
+      for (const rawChapter of book.chapters) {
+        const slug = String(rawChapter?.slug || '').trim();
+        if (!isValidSlug(slug)) continue;
+        const chapterNumber = Number(rawChapter?.chapterNumber);
+        if (!Number.isFinite(chapterNumber)) continue;
+
+        const chapterVariants = chaptersByNumber.get(chapterNumber) || [];
         chapterVariants.push({
           bookSlug: sharedSlug,
           language: book.language,
-          slug: chapter.slug,
-          updatedAt: chapter.updatedAt
+          slug,
+          chapterNumber,
+          updatedAt: rawChapter.updatedAt
         });
-        chaptersByNumber.set(chapter.chapterNumber, chapterVariants);
+        chaptersByNumber.set(chapterNumber, chapterVariants);
       }
     }
 
     for (const chapterVariants of chaptersByNumber.values()) {
       const chapterAlternates = buildAlternateLinks(chapterVariants, (chapter) => `/book/${chapter.bookSlug}/${chapter.slug}`);
+      const chapterLastmod = getMaxIsoDate(chapterVariants.map((chapter) => chapter.updatedAt), generatedAt);
 
       for (const chapter of chapterVariants) {
-        entries.push(createUrlEntry({
+        dynamicEntries.push({
           loc: buildAbsoluteUrl(`/book/${chapter.bookSlug}/${chapter.slug}`, chapter.language),
           alternates: chapterAlternates,
-          lastmod: normalizeIsoDate(chapter.updatedAt, new Date(generatedAt))
-        }));
+          lastmod: chapterLastmod
+        });
       }
     }
   }
 
-  for (const post of blogPosts) {
-    entries.push(createUrlEntry({
-      loc: buildAbsoluteUrl(`/blog/${post.slug}`),
-      lastmod: normalizeIsoDate(post.updatedAt || post.publishedAt, new Date(generatedAt))
-    }));
+  for (const rawPost of blogPosts) {
+    const slug = String(rawPost?.slug || '').trim();
+    if (!isValidSlug(slug)) continue;
+
+    dynamicEntries.push({
+      loc: buildAbsoluteUrl(`/blog/${slug}`),
+      lastmod: getMaxIsoDate([rawPost.updatedAt, rawPost.publishedAt], generatedAt),
+      alternates: []
+    });
   }
 
-  return buildSitemapDocument(entries);
+  return dedupeAndSortEntries(dynamicEntries).map((entry) => createUrlEntry(entry));
 }
+
+function createFallbackSitemap(generatedAt = new Date().toISOString()) {
+  const xml = buildSitemapDocument(createStaticEntries(generatedAt));
+  validateSitemapXml(xml);
+  return xml;
+}
+
+export async function buildSitemapXml() {
+  const fallbackGeneratedAt = new Date().toISOString();
+
+  try {
+    const payload = await fetchJsonWithRetry('/sitemap');
+    const generatedAt = normalizeIsoDate(payload.generatedAt, fallbackGeneratedAt);
+    const entries = [
+      ...createStaticEntries(generatedAt),
+      ...createDynamicEntries(payload, generatedAt)
+    ];
+    const xml = buildSitemapDocument(entries);
+    validateSitemapXml(xml);
+    return xml;
+  } catch (error) {
+    console.error('[sitemap] Falling back to static sitemap XML.', error);
+    return createFallbackSitemap(fallbackGeneratedAt);
+  }
+}
+
+export { createFallbackSitemap };

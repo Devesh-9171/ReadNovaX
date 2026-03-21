@@ -1,6 +1,6 @@
 import Head from 'next/head';
 
-export default function SeoHead({ title, description, image, url, structuredData, noIndex = false, type = 'website' }) {
+export default function SeoHead({ title, description, image, url, structuredData, noIndex = false, type = 'website', alternates = [] }) {
   return (
     <Head>
       <title>{title}</title>
@@ -8,6 +8,9 @@ export default function SeoHead({ title, description, image, url, structuredData
       <meta name="theme-color" content="#2563eb" />
       <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
       <link rel="canonical" href={url} />
+      {alternates.map((alternate) => (
+        <link key={`${alternate.hrefLang}-${alternate.href}`} rel="alternate" hrefLang={alternate.hrefLang} href={alternate.href} />
+      ))}
       <meta name="robots" content={noIndex ? 'noindex,nofollow' : 'index,follow'} />
       <meta property="og:title" content={title} />
       <meta property="og:description" content={description} />
