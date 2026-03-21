@@ -8,6 +8,7 @@ const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
 const { cache } = require('../utils/cache');
 const { DEFAULT_LANGUAGE, normalizeLanguage } = require('../utils/language');
+const { applySharedSlugToBooks, buildSharedBookSlug, syncGroupBookSlugs } = require('../utils/bookSlug');
 const { sanitizeHtml } = require('../utils/html');
 
 function generateSlug(value) {
@@ -59,16 +60,19 @@ exports.createBook = asyncHandler(async (req, res) => {
     throw new AppError('This language already exists for the selected book group', 409);
   }
 
+  const slug = await buildSharedBookSlug({ groupId, title: data.title, language });
   const book = await Book.create({
     ...data,
     language,
     groupId,
-    slug: generateSlug(language === 'hi' ? `${data.title}-hi` : data.title),
+    slug,
     coverImage: req.file ? `/uploads/${req.file.filename}` : data.coverImage
   });
 
+  await syncGroupBookSlugs(groupId, { title: data.title, language });
+  const [sharedBook] = await applySharedSlugToBooks([book.toObject ? book.toObject() : book]);
   cache.flushAll();
-  res.status(201).json(book);
+  res.status(201).json(sharedBook || book);
 });
 
 exports.updateBook = asyncHandler(async (req, res) => {
@@ -76,24 +80,31 @@ exports.updateBook = asyncHandler(async (req, res) => {
   if (!existingBook) throw new AppError('Book not found', 404);
 
   const data = req.body;
+  const previousGroupId = existingBook.groupId || String(existingBook._id);
   const nextLanguage = normalizeLanguage(data.language, existingBook.language || DEFAULT_LANGUAGE);
-  const nextGroupId = data.groupId ? await resolveGroupId(data.groupId) : existingBook.groupId || String(existingBook._id);
+  const nextGroupId = data.groupId ? await resolveGroupId(data.groupId) : previousGroupId;
 
   const duplicateLanguage = await Book.findOne({ groupId: nextGroupId, language: nextLanguage, _id: { $ne: existingBook._id } }).lean();
   if (duplicateLanguage) {
     throw new AppError('This language already exists for the selected book group', 409);
   }
 
-  if (data.title) data.slug = generateSlug(nextLanguage === 'hi' ? `${data.title}-hi` : data.title);
+  const nextTitle = data.title ? String(data.title).trim() : existingBook.title;
+  data.slug = await buildSharedBookSlug({ groupId: nextGroupId, title: nextTitle, language: nextLanguage });
   data.language = nextLanguage;
   data.groupId = nextGroupId;
   if (req.file) data.coverImage = `/uploads/${req.file.filename}`;
 
   const book = await Book.findByIdAndUpdate(req.params.bookId, data, { new: true });
   await Chapter.updateMany({ bookId: book._id }, { $set: { language: book.language } });
+  await syncGroupBookSlugs(nextGroupId, { title: nextTitle, language: nextLanguage });
+  if (previousGroupId !== nextGroupId) {
+    await syncGroupBookSlugs(previousGroupId);
+  }
 
+  const [sharedBook] = await applySharedSlugToBooks([book.toObject ? book.toObject() : book]);
   cache.flushAll();
-  res.json(book);
+  res.json(sharedBook || book);
 });
 
 exports.addChapter = asyncHandler(async (req, res) => {

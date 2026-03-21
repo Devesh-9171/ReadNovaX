@@ -105,10 +105,11 @@ async function fetchJsonWithRetry(requestPath) {
   throw new Error(`Unable to fetch runtime sitemap data: ${lastError?.message || 'Unknown error'}`);
 }
 
-function createUrlEntry({ loc, lastmod }) {
+function createUrlEntry({ loc, lastmod, alternates = [] }) {
   return [
     '  <url>',
     `    <loc>${xmlEscape(loc)}</loc>`,
+    ...alternates.map((alternate) => `    <xhtml:link rel="alternate" hreflang="${xmlEscape(alternate.hreflang)}" href="${xmlEscape(alternate.href)}" />`),
     `    <lastmod>${xmlEscape(lastmod)}</lastmod>`,
     '  </url>'
   ].join('\n');
@@ -117,10 +118,22 @@ function createUrlEntry({ loc, lastmod }) {
 function buildSitemapDocument(entries) {
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
-    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">',
     ...entries,
     '</urlset>'
   ].join('\n');
+}
+
+function buildAlternateLinks(variants, routeBuilder) {
+  return variants.map((variant) => ({
+    hreflang: variant.language === 'hi' ? 'hi' : 'en',
+    href: buildAbsoluteUrl(routeBuilder(variant), variant.language)
+  }));
+}
+
+function getGroupSharedSlug(variants) {
+  const englishVariant = variants.find((variant) => variant.language === 'en' && variant.slug);
+  return englishVariant?.slug || variants[0]?.slug;
 }
 
 export async function buildSitemapXml() {
@@ -147,9 +160,13 @@ export async function buildSitemapXml() {
   }
 
   for (const variants of booksByGroupId.values()) {
+    const sharedSlug = getGroupSharedSlug(variants);
+    const bookAlternates = buildAlternateLinks(variants, () => `/book/${sharedSlug}`);
+
     for (const book of variants) {
       entries.push(createUrlEntry({
-        loc: buildAbsoluteUrl(`/book/${book.slug}`, book.language),
+        loc: buildAbsoluteUrl(`/book/${sharedSlug}`, book.language),
+        alternates: bookAlternates,
         lastmod: normalizeIsoDate(book.updatedAt, new Date(generatedAt))
       }));
     }
@@ -159,7 +176,7 @@ export async function buildSitemapXml() {
       for (const chapter of book.chapters || []) {
         const chapterVariants = chaptersByNumber.get(chapter.chapterNumber) || [];
         chapterVariants.push({
-          bookSlug: book.slug,
+          bookSlug: sharedSlug,
           language: book.language,
           slug: chapter.slug,
           updatedAt: chapter.updatedAt
@@ -169,9 +186,12 @@ export async function buildSitemapXml() {
     }
 
     for (const chapterVariants of chaptersByNumber.values()) {
+      const chapterAlternates = buildAlternateLinks(chapterVariants, (chapter) => `/book/${chapter.bookSlug}/${chapter.slug}`);
+
       for (const chapter of chapterVariants) {
         entries.push(createUrlEntry({
           loc: buildAbsoluteUrl(`/book/${chapter.bookSlug}/${chapter.slug}`, chapter.language),
+          alternates: chapterAlternates,
           lastmod: normalizeIsoDate(chapter.updatedAt, new Date(generatedAt))
         }));
       }

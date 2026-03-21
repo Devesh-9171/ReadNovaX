@@ -1,4 +1,3 @@
-const slugify = require('slugify');
 const crypto = require('crypto');
 const mongoose = require('mongoose');
 const Book = require('../models/Book');
@@ -8,34 +7,12 @@ const AppError = require('../utils/AppError');
 const { getPagination, buildPaginationMeta } = require('../utils/pagination');
 const { cache, cacheKey } = require('../utils/cache');
 const { DEFAULT_LANGUAGE, normalizeLanguage } = require('../utils/language');
+const { applySharedSlugToBooks, buildSharedBookSlug, syncGroupBookSlugs } = require('../utils/bookSlug');
 
 function computeTrendingScore(book) {
   return book.viewsLast24h * 3 + book.viewsLast7d * 2 + book.totalViews;
 }
 
-
-function createBookSlug(title, language) {
-  const baseSlug = slugify(String(title || ''), { lower: true, strict: true, trim: true });
-  return language === 'hi' ? `${baseSlug || 'book'}-hi` : baseSlug;
-}
-
-async function ensureUniqueBookSlug(title, language, excludeId = null) {
-  const baseSlug = createBookSlug(title, language);
-  let slug = baseSlug || `book-${language}`;
-  let suffix = 1;
-
-  while (
-    await Book.exists({
-      slug,
-      ...(excludeId ? { _id: { $ne: excludeId } } : {})
-    })
-  ) {
-    suffix += 1;
-    slug = `${baseSlug}-${suffix}`;
-  }
-
-  return slug;
-}
 
 async function resolveGroupId(groupId) {
   if (!groupId) {
@@ -150,7 +127,9 @@ async function getTranslations(groupId, selectedBookId) {
     .select('title slug language groupId coverImage')
     .lean();
 
-  return translations.map((translation) => ({
+  const sharedSlugTranslations = await applySharedSlugToBooks(translations);
+
+  return sharedSlugTranslations.map((translation) => ({
     ...translation,
     isActive: String(translation._id) === String(selectedBookId)
   }));
@@ -189,7 +168,7 @@ exports.createBook = asyncHandler(async (req, res) => {
     throw new AppError('This language already exists for the selected book group', 409);
   }
 
-  const slug = await ensureUniqueBookSlug(title, normalizedLanguage);
+  const slug = await buildSharedBookSlug({ groupId: nextGroupId, title, language: normalizedLanguage });
   const book = await Book.create({
     title: String(title).trim(),
     author: normalizedAuthor,
@@ -201,9 +180,11 @@ exports.createBook = asyncHandler(async (req, res) => {
     language: normalizedLanguage,
     groupId: nextGroupId
   });
+  await syncGroupBookSlugs(nextGroupId, { title: String(title).trim(), language: normalizedLanguage });
+  const [sharedBook] = await applySharedSlugToBooks([book.toObject ? book.toObject() : book]);
   cache.flushAll();
 
-  res.status(201).json({ success: true, book });
+  res.status(201).json({ success: true, book: sharedBook });
 });
 
 exports.updateBook = asyncHandler(async (req, res) => {
@@ -211,10 +192,11 @@ exports.updateBook = asyncHandler(async (req, res) => {
   const book = await Book.findById(req.params.id);
   if (!book) throw new AppError('Book not found', 404);
 
+  const previousGroupId = book.groupId || book._id.toString();
   const nextLanguage = normalizeLanguage(language, book.language || DEFAULT_LANGUAGE);
   const nextTitle = title ? String(title).trim() : book.title;
-  const nextSlug = await ensureUniqueBookSlug(nextTitle, nextLanguage, book._id);
-  const nextGroupId = groupId ? await resolveGroupId(groupId) : book.groupId || book._id.toString();
+  const nextGroupId = groupId ? await resolveGroupId(groupId) : previousGroupId;
+  const nextSlug = await buildSharedBookSlug({ groupId: nextGroupId, title: nextTitle, language: nextLanguage });
   const duplicateLanguage = await Book.findOne({ groupId: nextGroupId, language: nextLanguage, _id: { $ne: book._id } }).lean();
   if (duplicateLanguage) {
     throw new AppError('This language already exists for the selected book group', 409);
@@ -232,9 +214,15 @@ exports.updateBook = asyncHandler(async (req, res) => {
 
   await book.save();
   await Chapter.updateMany({ bookId: book._id }, { $set: { language: book.language } });
+  await syncGroupBookSlugs(nextGroupId, { title: nextTitle, language: nextLanguage });
+  if (previousGroupId !== nextGroupId) {
+    await syncGroupBookSlugs(previousGroupId);
+  }
+
+  const [sharedBook] = await applySharedSlugToBooks([book.toObject ? book.toObject() : book]);
   cache.flushAll();
 
-  res.json({ success: true, book });
+  res.json({ success: true, book: sharedBook });
 });
 
 exports.deleteBook = asyncHandler(async (req, res) => {
@@ -265,9 +253,9 @@ exports.getHomepage = asyncHandler(async (req, res) => {
       .lean()
   ]);
 
-  const featured = selectPreferredBooks(featuredRaw, lang).slice(0, 6);
-  const trending = selectPreferredBooks(trendingRaw, lang).slice(0, 8);
-  const popular = selectPreferredBooks(popularRaw, lang).slice(0, 8);
+  const featured = await applySharedSlugToBooks(selectPreferredBooks(featuredRaw, lang).slice(0, 6));
+  const trending = await applySharedSlugToBooks(selectPreferredBooks(trendingRaw, lang).slice(0, 8));
+  const popular = await applySharedSlugToBooks(selectPreferredBooks(popularRaw, lang).slice(0, 8));
   const latestChaptersByGroup = new Map();
   for (const chapter of latestChaptersRaw) {
     if (!chapter.bookId) continue;
@@ -281,8 +269,12 @@ exports.getHomepage = asyncHandler(async (req, res) => {
     }
   }
   const latestChapters = Array.from(latestChaptersByGroup.values()).slice(0, 10);
+  const latestChaptersWithSharedSlugs = await Promise.all(latestChapters.map(async (chapter) => {
+    const [sharedBook] = await applySharedSlugToBooks([chapter.bookId]);
+    return { ...chapter, bookId: sharedBook || chapter.bookId };
+  }));
 
-  const payload = { featured, trending, popular, latestChapters };
+  const payload = { featured, trending, popular, latestChapters: latestChaptersWithSharedSlugs };
   cache.set(key, payload);
   res.json({ success: true, ...payload });
 });
@@ -334,7 +326,9 @@ exports.getBooks = asyncHandler(async (req, res) => {
     }));
   }
 
-  res.json({ success: true, data: books, pagination: buildPaginationMeta({ total, page, limit }) });
+  const booksWithSharedSlugs = await applySharedSlugToBooks(books);
+
+  res.json({ success: true, data: booksWithSharedSlugs, pagination: buildPaginationMeta({ total, page, limit }) });
 });
 
 exports.getBookById = asyncHandler(async (req, res) => {
@@ -354,7 +348,8 @@ exports.getBookById = asyncHandler(async (req, res) => {
     getTranslations(book.groupId || String(book._id), book._id)
   ]);
 
-  const payload = { book, chapters, translations };
+  const [sharedBook] = await applySharedSlugToBooks([book]);
+  const payload = { book: sharedBook || book, chapters, translations };
   cache.set(key, payload);
   res.json({ success: true, ...payload });
 });
@@ -376,7 +371,8 @@ exports.getBookBySlug = asyncHandler(async (req, res) => {
     getTranslations(book.groupId || String(book._id), book._id)
   ]);
 
-  const payload = { book, chapters, translations };
+  const [sharedBook] = await applySharedSlugToBooks([book]);
+  const payload = { book: sharedBook || book, chapters, translations };
   cache.set(key, payload);
   res.json(payload);
 });
@@ -405,7 +401,9 @@ exports.getCategoryBooks = asyncHandler(async (req, res) => {
     }
   });
 
-  res.json({ data: books, pagination: buildPaginationMeta({ total, page, limit }) });
+  const booksWithSharedSlugs = await applySharedSlugToBooks(books);
+
+  res.json({ data: booksWithSharedSlugs, pagination: buildPaginationMeta({ total, page, limit }) });
 });
 
 exports.recalculateTrending = asyncHandler(async (_req, res) => {
