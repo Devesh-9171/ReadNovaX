@@ -1,5 +1,6 @@
 const slugify = require('slugify');
 const crypto = require('crypto');
+const mongoose = require('mongoose');
 const Book = require('../models/Book');
 const Chapter = require('../models/Chapter');
 const BlogPost = require('../models/BlogPost');
@@ -16,8 +17,13 @@ function generateSlug(value) {
 
 async function resolveGroupId(groupId) {
   if (!groupId) return crypto.randomUUID();
+  if (!mongoose.Types.ObjectId.isValid(groupId)) return String(groupId).trim();
   const existing = await Book.findById(groupId).select('groupId').lean();
   return existing?.groupId || String(groupId).trim();
+}
+
+function shouldRequireExistingGroup(language) {
+  return normalizeLanguage(language, DEFAULT_LANGUAGE) !== DEFAULT_LANGUAGE;
 }
 
 async function ensureUniqueBlogSlug(title, excludeId) {
@@ -42,8 +48,12 @@ async function ensureUniqueBlogSlug(title, excludeId) {
 
 exports.createBook = asyncHandler(async (req, res) => {
   const data = req.body;
-  const groupId = await resolveGroupId(data.groupId);
   const language = normalizeLanguage(data.language, DEFAULT_LANGUAGE);
+  if (shouldRequireExistingGroup(language) && !data.groupId) {
+    throw new AppError('Translated books must be linked to an existing translation group', 400);
+  }
+
+  const groupId = await resolveGroupId(data.groupId);
   const duplicateLanguage = await Book.findOne({ groupId, language }).lean();
   if (duplicateLanguage) {
     throw new AppError('This language already exists for the selected book group', 409);

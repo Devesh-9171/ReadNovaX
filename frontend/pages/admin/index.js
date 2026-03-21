@@ -16,6 +16,7 @@ const LANGUAGE_OPTIONS = [
   { value: 'en', label: 'English' },
   { value: 'hi', label: 'Hindi' }
 ];
+const DEFAULT_LANGUAGE = 'en';
 
 const initialBookForm = {
   title: '',
@@ -68,6 +69,78 @@ function getToken() {
 function getAuthHeaders() {
   const token = getToken();
   return token ? { Authorization: `Bearer ${token}` } : null;
+}
+
+function getBookGroupKey(book) {
+  return book?.groupId || book?._id || '';
+}
+
+function isDefaultLanguage(language) {
+  return (language || DEFAULT_LANGUAGE) === DEFAULT_LANGUAGE;
+}
+
+function formatBookOptionLabel(book) {
+  return `${book.title} (${(book.language || DEFAULT_LANGUAGE).toUpperCase()})`;
+}
+
+function buildTranslationGroupOptions(books) {
+  const groups = new Map();
+
+  for (const book of books) {
+    const key = getBookGroupKey(book);
+    if (!key) continue;
+
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(book);
+  }
+
+  return Array.from(groups.entries())
+    .map(([value, items]) => {
+      const sortedItems = [...items].sort((left, right) => {
+        if ((left.language || DEFAULT_LANGUAGE) === DEFAULT_LANGUAGE && (right.language || DEFAULT_LANGUAGE) !== DEFAULT_LANGUAGE) return -1;
+        if ((right.language || DEFAULT_LANGUAGE) === DEFAULT_LANGUAGE && (left.language || DEFAULT_LANGUAGE) !== DEFAULT_LANGUAGE) return 1;
+        return left.title.localeCompare(right.title);
+      });
+      const primaryBook = sortedItems[0];
+      const languages = Array.from(new Set(sortedItems.map((item) => (item.language || DEFAULT_LANGUAGE).toUpperCase()))).join(', ');
+
+      return {
+        value,
+        label: `${primaryBook.title} — ${languages}`,
+        books: sortedItems
+      };
+    })
+    .sort((left, right) => left.label.localeCompare(right.label));
+}
+
+function buildBookVariantOptions(books) {
+  const groups = new Map();
+
+  for (const book of books) {
+    const key = getBookGroupKey(book);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(book);
+  }
+
+  return Array.from(groups.values())
+    .sort((left, right) => {
+      const leftTitle = left.find((book) => (book.language || DEFAULT_LANGUAGE) === DEFAULT_LANGUAGE)?.title || left[0]?.title || '';
+      const rightTitle = right.find((book) => (book.language || DEFAULT_LANGUAGE) === DEFAULT_LANGUAGE)?.title || right[0]?.title || '';
+      return leftTitle.localeCompare(rightTitle);
+    })
+    .flatMap((items) =>
+      [...items]
+        .sort((left, right) => {
+          if ((left.language || DEFAULT_LANGUAGE) === DEFAULT_LANGUAGE && (right.language || DEFAULT_LANGUAGE) !== DEFAULT_LANGUAGE) return -1;
+          if ((right.language || DEFAULT_LANGUAGE) === DEFAULT_LANGUAGE && (left.language || DEFAULT_LANGUAGE) !== DEFAULT_LANGUAGE) return 1;
+          return (left.language || DEFAULT_LANGUAGE).localeCompare(right.language || DEFAULT_LANGUAGE);
+        })
+        .map((book) => ({
+          value: book._id,
+          label: formatBookOptionLabel(book),
+          groupId: getBookGroupKey(book)
+        }))
+    );
 }
 
 function extractPlainText(html) {
@@ -132,6 +205,9 @@ export default function AdminPage() {
   const chapterSlugPreview = useMemo(() => slugifyPreview(chapterForm.title || `chapter-${chapterForm.chapterNumber || 'new'}`), [chapterForm.chapterNumber, chapterForm.title]);
   const blogSlugPreview = useMemo(() => slugifyPreview(blogForm.title || 'new-blog-post'), [blogForm.title]);
   const editBlogSlugPreview = useMemo(() => slugifyPreview(editBlogForm.title || 'updated-blog-post'), [editBlogForm.title]);
+  const translationGroupOptions = useMemo(() => buildTranslationGroupOptions(books), [books]);
+  const bookVariantOptions = useMemo(() => buildBookVariantOptions(books), [books]);
+  const requiresExistingGroup = !isDefaultLanguage(bookForm.language);
 
   const resetMessages = () => {
     setFormError('');
@@ -157,7 +233,7 @@ export default function AdminPage() {
     try {
       const [statsResponse, booksResponse, blogsResponse] = await Promise.all([
         api.get('/admin/stats', { headers }),
-        api.get('/books', { params: { limit: 100 } }),
+        api.get('/books', { params: { limit: 100, includeAllLanguages: true } }),
         api.get('/admin/blogs', { headers })
       ]);
 
@@ -194,6 +270,10 @@ export default function AdminPage() {
 
     try {
       setSubmittingBook(true);
+      if (requiresExistingGroup && !bookForm.groupId) {
+        throw new Error('Select an existing translation group before creating a translated book.');
+      }
+
       await api.post('/books', {
         title: bookForm.title.trim(),
         author: bookForm.author.trim(),
@@ -423,12 +503,17 @@ export default function AdminPage() {
                 {LANGUAGE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
             </div>
-            <select className={INPUT_CLASS} value={bookForm.groupId} onChange={(event) => setBookForm((current) => ({ ...current, groupId: event.target.value }))}>
-              <option value="">Create a new title group</option>
-              {books.map((book) => <option key={book._id} value={book._id}>{book.title} ({(book.language || 'en').toUpperCase()})</option>)}
+            <select className={INPUT_CLASS} value={bookForm.groupId} onChange={(event) => setBookForm((current) => ({ ...current, groupId: event.target.value }))} required={requiresExistingGroup}>
+              <option value="">{requiresExistingGroup ? 'Select an existing translation group' : 'Create a new title group'}</option>
+              {translationGroupOptions.map((group) => <option key={group.value} value={group.value}>{group.label}</option>)}
             </select>
+            {requiresExistingGroup ? (
+              <p className="text-sm text-slate-600 dark:text-slate-300">
+                Non-English books must be attached to an existing translation group so chapters can be added to every language variant.
+              </p>
+            ) : null}
             <input className={INPUT_CLASS} type="url" value={bookForm.coverImage} onChange={(event) => setBookForm((current) => ({ ...current, coverImage: event.target.value }))} placeholder="Cover image URL" required />
-            <button type="submit" disabled={submittingBook} className="w-full rounded-xl bg-brand-600 px-4 py-2.5 text-white transition hover:bg-brand-500 disabled:cursor-not-allowed disabled:opacity-60">
+            <button type="submit" disabled={submittingBook || (requiresExistingGroup && translationGroupOptions.length === 0)} className="w-full rounded-xl bg-brand-600 px-4 py-2.5 text-white transition hover:bg-brand-500 disabled:cursor-not-allowed disabled:opacity-60">
               {submittingBook ? 'Saving book...' : 'Save Book'}
             </button>
           </form>
@@ -441,9 +526,9 @@ export default function AdminPage() {
           </div>
 
           <form onSubmit={submitChapter} className="space-y-4">
-            <select className={INPUT_CLASS} value={chapterForm.bookId} onChange={(event) => setChapterForm((current) => ({ ...current, bookId: event.target.value }))} required disabled={loadingBooks || books.length === 0}>
+            <select className={INPUT_CLASS} value={chapterForm.bookId} onChange={(event) => setChapterForm((current) => ({ ...current, bookId: event.target.value }))} required disabled={loadingBooks || bookVariantOptions.length === 0}>
               <option value="">Select a book</option>
-              {books.map((book) => <option key={book._id} value={book._id}>{book.title} ({(book.language || 'en').toUpperCase()})</option>)}
+              {bookVariantOptions.map((book) => <option key={book.value} value={book.value}>{book.label}</option>)}
             </select>
             <input className={INPUT_CLASS} type="number" min="1" value={chapterForm.chapterNumber} onChange={(event) => setChapterForm((current) => ({ ...current, chapterNumber: event.target.value }))} placeholder="Chapter number" required />
             <input className={INPUT_CLASS} type="text" value={chapterForm.title} onChange={(event) => setChapterForm((current) => ({ ...current, title: event.target.value }))} placeholder="Chapter title" required />
@@ -451,7 +536,7 @@ export default function AdminPage() {
               Generated slug: <span className="font-semibold text-slate-900 dark:text-white">{chapterSlugPreview || 'chapter-preview'}</span>
             </div>
             <textarea className={`${TEXTAREA_CLASS} min-h-[240px]`} value={chapterForm.content} onChange={(event) => setChapterForm((current) => ({ ...current, content: event.target.value }))} placeholder="Write chapter content here" required />
-            <button type="submit" disabled={submittingChapter || books.length === 0} className="w-full rounded-xl bg-brand-600 px-4 py-2.5 text-white transition hover:bg-brand-500 disabled:cursor-not-allowed disabled:opacity-60">
+            <button type="submit" disabled={submittingChapter || bookVariantOptions.length === 0} className="w-full rounded-xl bg-brand-600 px-4 py-2.5 text-white transition hover:bg-brand-500 disabled:cursor-not-allowed disabled:opacity-60">
               {submittingChapter ? 'Saving chapter...' : 'Save Chapter'}
             </button>
           </form>
@@ -530,7 +615,7 @@ export default function AdminPage() {
                           </div>
                           <select className={INPUT_CLASS} value={editForm.groupId} onChange={(event) => setEditForm((current) => ({ ...current, groupId: event.target.value }))}>
                             <option value="">Standalone group</option>
-                            {books.map((optionBook) => <option key={optionBook._id} value={optionBook._id}>{optionBook.title} ({(optionBook.language || 'en').toUpperCase()})</option>)}
+                            {translationGroupOptions.map((group) => <option key={group.value} value={group.value}>{group.label}</option>)}
                           </select>
                           <input className={INPUT_CLASS} type="url" value={editForm.coverImage} onChange={(event) => setEditForm((current) => ({ ...current, coverImage: event.target.value }))} />
                           <div className="flex flex-wrap gap-2">
