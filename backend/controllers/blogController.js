@@ -3,7 +3,7 @@ const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
 const { cache, cacheKey } = require('../utils/cache');
 
-const BLOG_LIST_SELECT = 'title slug description coverImage publishedAt createdAt updatedAt';
+const BLOG_LIST_SELECT = 'title slug description coverImage publishedAt createdAt updatedAt contentHtml';
 const BLOG_SORT = { publishedAt: -1, createdAt: -1, _id: -1 };
 const LATEST_POSTS_LIMIT = 4;
 

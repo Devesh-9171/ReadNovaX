@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const chapterSchema = new mongoose.Schema(
   {
     bookId: { type: mongoose.Schema.Types.ObjectId, ref: 'Book', required: true, index: true },
+    language: { type: String, enum: ['en', 'hi'], default: 'en', index: true },
     title: { type: String, required: true },
     slug: { type: String, required: true, index: true },
     chapterNumber: { type: Number, required: true },
@@ -14,6 +15,7 @@ const chapterSchema = new mongoose.Schema(
 
 chapterSchema.index({ bookId: 1, chapterNumber: 1 }, { unique: true });
 chapterSchema.index({ bookId: 1, slug: 1 }, { unique: true });
+chapterSchema.index({ language: 1, updatedAt: -1 });
 chapterSchema.index({ updatedAt: -1 });
 
 module.exports = mongoose.model('Chapter', chapterSchema);

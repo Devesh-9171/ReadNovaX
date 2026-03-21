@@ -43,8 +43,7 @@ export default function Layout({ children }) {
       { href: '/category/romance', label: 'Romance' },
       { href: '/category/comedy', label: 'Comedy' },
       { href: '/blog', label: 'Blog' },
-      { href: '/profile', label: 'Profile' },
-      { href: '/admin', label: 'Admin' }
+      { href: '/profile', label: 'Profile' }
     ],
     []
   );
@@ -102,6 +101,10 @@ export default function Layout({ children }) {
                 {item.label}
               </Link>
             ))}
+
+            {authenticated && (
+              <Link href="/admin" className={NAV_LINK_CLASS}>Admin</Link>
+            )}
 
             {authenticated ? (
               <button type="button" onClick={handleLogout} className="rounded-full border border-slate-300 px-3 py-1.5 text-left transition hover:border-red-400 hover:text-red-500 dark:border-slate-700 dark:hover:border-red-400 dark:hover:text-red-300">

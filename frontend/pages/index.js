@@ -2,7 +2,6 @@ import Link from 'next/link';
 import Layout from '../components/Layout';
 import BookCard from '../components/BookCard';
 import SeoHead from '../components/SeoHead';
-import AdSlot from '../components/AdSlot';
 import api from '../utils/api';
 import { buildMeta } from '../utils/seo';
 
@@ -37,7 +36,6 @@ export default function Home({ data, categories, isFallback }) {
         <Link href="/category/action" className="rounded bg-white px-4 py-2 font-semibold text-blue-700">Start Reading</Link>
       </section>
 
-      <AdSlot label="Top Banner Ad" className="mb-8" />
 
       {isFallback && (
         <p className="mb-6 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-700 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-200">
@@ -54,7 +52,7 @@ export default function Home({ data, categories, isFallback }) {
         <div className="rounded-xl border bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
           {data.latestChapters.filter((chapter) => chapter.bookId).length > 0 ? (
             data.latestChapters.filter((chapter) => chapter.bookId).map((chapter) => (
-              <Link key={chapter._id} className="block rounded p-2 hover:bg-slate-100 dark:hover:bg-slate-800" href={`/books/${chapter.bookId.slug}/${chapter.slug}`}>
+              <Link key={chapter._id} className="block rounded p-2 hover:bg-slate-100 dark:hover:bg-slate-800" href={`/book/${chapter.bookId.slug}/${chapter.slug}${chapter.bookId.language === 'hi' ? '?lang=hi' : ''}`}>
                 {chapter.bookId.title} — Chapter {chapter.chapterNumber}: {chapter.title}
               </Link>
             ))

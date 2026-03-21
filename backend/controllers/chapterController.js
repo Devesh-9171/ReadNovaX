@@ -5,6 +5,10 @@ const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
 const { cache, cacheKey } = require('../utils/cache');
 
+function normalizeLanguage(value, fallback = 'en') {
+  return value === 'hi' ? 'hi' : fallback;
+}
+
 exports.createChapter = asyncHandler(async (req, res) => {
   const { bookId, chapterNumber, title, content } = req.body;
 
@@ -12,7 +16,7 @@ exports.createChapter = asyncHandler(async (req, res) => {
     throw new AppError('bookId, chapterNumber, title, and content are required', 400);
   }
 
-  const book = await Book.findById(bookId).select('_id');
+  const book = await Book.findById(bookId).select('_id language');
   if (!book) throw new AppError('Book not found', 404);
 
   const baseSlug = slugify(String(title).trim() || `chapter-${chapterNumber}`, { lower: true, strict: true }) || `chapter-${chapterNumber}`;
@@ -26,6 +30,7 @@ exports.createChapter = asyncHandler(async (req, res) => {
 
   const chapter = await Chapter.create({
     bookId: book._id,
+    language: book.language || 'en',
     chapterNumber: Number(chapterNumber),
     title: String(title).trim(),
     content: String(content).trim(),
@@ -38,39 +43,55 @@ exports.createChapter = asyncHandler(async (req, res) => {
 
 exports.getChapter = asyncHandler(async (req, res) => {
   const { slug, chapterSlug } = req.params;
-  const key = cacheKey(['chapter', slug, chapterSlug]);
+  const requestedLanguage = normalizeLanguage(req.query.lang, 'en');
+  const key = cacheKey(['chapter', slug, chapterSlug, requestedLanguage]);
   const cached = cache.get(key);
   if (cached) return res.json(cached);
 
+  const seedBook = await Book.findOne({ slug }).lean();
+  if (!seedBook) throw new AppError('Book not found', 404);
+
+  const activeBook = await Book.findOne({ groupId: seedBook.groupId || String(seedBook._id), language: requestedLanguage }).lean() || seedBook;
+  const initialChapter = await Chapter.findOne({ bookId: seedBook._id, slug: chapterSlug }).lean();
+  if (!initialChapter) throw new AppError('Chapter not found', 404);
+
+  const chapter = await Chapter.findOneAndUpdate(
+    activeBook._id.equals?.(seedBook._id) || String(activeBook._id) === String(seedBook._id)
+      ? { bookId: activeBook._id, slug: chapterSlug }
+      : { bookId: activeBook._id, chapterNumber: initialChapter.chapterNumber },
+    { $inc: { views: 1 } },
+    { new: true }
+  ).lean();
+
+  if (!chapter) throw new AppError('Chapter not found in the selected language', 404);
+
   const book = await Book.findOneAndUpdate(
-    { slug },
+    { _id: activeBook._id },
     {
       $inc: { totalViews: 1, viewsLast24h: 1, viewsLast7d: 1 }
     },
     { new: true }
   ).lean();
 
-  if (!book) throw new AppError('Book not found', 404);
-
-  const chapter = await Chapter.findOneAndUpdate(
-    { bookId: book._id, slug: chapterSlug },
-    { $inc: { views: 1 } },
-    { new: true }
-  ).lean();
-
-  if (!chapter) throw new AppError('Chapter not found', 404);
-
   const nextTrendingScore = book.viewsLast24h * 3 + book.viewsLast7d * 2 + book.totalViews;
-
   await Book.updateOne({ _id: book._id }, { $set: { trendingScore: nextTrendingScore } });
 
-  const [previousChapter, nextChapter, chapters] = await Promise.all([
+  const [previousChapter, nextChapter, chapters, translations] = await Promise.all([
     Chapter.findOne({ bookId: book._id, chapterNumber: chapter.chapterNumber - 1 }).select('title slug chapterNumber').lean(),
     Chapter.findOne({ bookId: book._id, chapterNumber: chapter.chapterNumber + 1 }).select('title slug chapterNumber').lean(),
-    Chapter.find({ bookId: book._id }).sort({ chapterNumber: 1 }).select('title slug chapterNumber').lean()
+    Chapter.find({ bookId: book._id }).sort({ chapterNumber: 1 }).select('title slug chapterNumber').lean(),
+    Book.find({ groupId: book.groupId || String(book._id) }).sort({ language: 1 }).select('title slug language groupId').lean()
   ]);
 
-  const payload = { book: { ...book, trendingScore: nextTrendingScore }, chapter, chapters, previousChapter, nextChapter };
+  const payload = {
+    book: { ...book, trendingScore: nextTrendingScore },
+    chapter,
+    chapters,
+    previousChapter,
+    nextChapter,
+    translations,
+    chapterNumber: chapter.chapterNumber
+  };
   cache.set(key, payload, 30);
   res.json(payload);
 });
