@@ -6,7 +6,7 @@ import SeoHead from './SeoHead';
 import ReaderControls from './ReaderControls';
 import AdSlot from './AdSlot';
 import api from '../utils/api';
-import { buildMeta } from '../utils/seo';
+import { buildCanonicalUrl, buildMeta } from '../utils/seo';
 import { useTheme } from '../context/ThemeContext';
 
 const DEFAULT_SETTINGS = {
@@ -18,11 +18,11 @@ function buildBookHref(book) {
   return `/book/${book.slug}${book.language === 'hi' ? '?lang=hi' : ''}`;
 }
 
-function getChapterHref(book, chapterSlug) {
-  return `/book/${book.slug}/${chapterSlug}${book.language === 'hi' ? '?lang=hi' : ''}`;
+function getChapterHref(book, chapterSlug, language = book.language) {
+  return `/book/${book.slug}/${chapterSlug}${language === 'hi' ? '?lang=hi' : ''}`;
 }
 
-export default function ChapterReaderPage({ book, chapter, chapters = [], previousChapter, nextChapter, translations = [], isFallback }) {
+export default function ChapterReaderPage({ book, chapter, chapters = [], previousChapter, nextChapter, translations = [], chapterTranslations = [], isFallback }) {
   const router = useRouter();
   const sentinelRef = useRef(null);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
@@ -178,6 +178,18 @@ export default function ChapterReaderPage({ book, chapter, chapters = [], previo
     path: `/book/${book.slug}/${chapter.slug}${book.language === 'hi' ? '?lang=hi' : ''}`
   });
 
+  const alternates = chapterTranslations.length > 0
+    ? [
+        ...chapterTranslations.map((translation) => ({
+          hrefLang: translation.language,
+          href: buildCanonicalUrl(`/book/${book.slug}/${translation.chapterSlug}${translation.language === 'hi' ? '?lang=hi' : ''}`)
+        })),
+        {
+          hrefLang: 'x-default',
+          href: buildCanonicalUrl(`/book/${book.slug}/${chapterTranslations.find((translation) => translation.language === 'en')?.chapterSlug || chapter.slug}`)
+        }
+      ]
+    : [{ hrefLang: book.language, href: buildCanonicalUrl(`/book/${book.slug}/${chapter.slug}${book.language === 'hi' ? '?lang=hi' : ''}`) }];
   const articleFontClass = settings.fontFamily === 'serif' ? 'font-[Georgia,_Cambria,_Times_New_Roman,_serif]' : 'font-[Inter,_system-ui,_sans-serif]';
 
   const handleJumpToChapter = (chapterSlug) => {
@@ -188,7 +200,7 @@ export default function ChapterReaderPage({ book, chapter, chapters = [], previo
 
   return (
     <Layout>
-      <SeoHead {...meta} />
+      <SeoHead {...meta} alternates={alternates} />
       <div className="fixed inset-x-0 top-[65px] z-40 h-1.5 bg-transparent">
         <div className="h-full bg-brand-600 transition-[width] duration-150 dark:bg-sky-400" style={{ width: `${progress}%` }} />
       </div>
@@ -216,7 +228,9 @@ export default function ChapterReaderPage({ book, chapter, chapters = [], previo
               {showLanguageSwitch ? (
                 <div className="inline-flex rounded-full border border-slate-300 bg-white p-1 text-sm font-semibold dark:border-slate-700 dark:bg-slate-900">
                   {translations.map((translation) => {
-                    const href = `/book/${book.slug}/${chapter.slug}${translation.language === 'hi' ? '?lang=hi' : ''}`;
+                    const chapterTranslation = chapterTranslations.find((item) => item.language === translation.language);
+                    if (!chapterTranslation) return null;
+                    const href = `/book/${book.slug}/${chapterTranslation.chapterSlug}${translation.language === 'hi' ? '?lang=hi' : ''}`;
                     const active = translation.language === book.language;
                     return (
                       <Link key={translation.language} href={href} className={`rounded-full px-3 py-1.5 uppercase ${active ? 'bg-brand-600 text-white dark:bg-sky-400 dark:text-slate-950' : 'text-slate-600 dark:text-slate-300'}`}>

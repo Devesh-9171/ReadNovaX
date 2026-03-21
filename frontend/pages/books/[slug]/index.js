@@ -4,12 +4,16 @@ import { useRouter } from 'next/router';
 import Layout from '../../../components/Layout';
 import SeoHead from '../../../components/SeoHead';
 import api from '../../../utils/api';
-import { buildMeta } from '../../../utils/seo';
+import { buildLanguageAlternates, buildMeta } from '../../../utils/seo';
 
 const LANGUAGE_OPTIONS = [
   { code: 'en', label: 'EN' },
   { code: 'hi', label: 'HI' }
 ];
+
+function buildBookPath(slug, language = 'en') {
+  return `/book/${slug}${language === 'hi' ? '?lang=hi' : ''}`;
+}
 
 export default function BookPage({ book, chapters, translations = [], isFallback }) {
   const router = useRouter();
@@ -34,15 +38,17 @@ export default function BookPage({ book, chapters, translations = [], isFallback
     title: `${book.title} by ${book.author} | ReadNovaX`,
     description: book.description,
     image: book.coverImage,
-    path: `/book/${book.slug}${book.language === 'hi' ? '?lang=hi' : ''}`
+    path: buildBookPath(book.slug, book.language)
   });
-
+  const alternateLanguages = translations.length > 0 ? translations.map((translation) => translation.language) : [book.language];
+  const alternates = buildLanguageAlternates(`/book/${book.slug}`, alternateLanguages);
   const showLanguageSwitch = translations.length > 1;
 
   return (
     <Layout>
       <SeoHead
         {...meta}
+        alternates={alternates}
         structuredData={{ '@context': 'https://schema.org', '@type': 'Book', name: book.title, author: book.author, aggregateRating: { '@type': 'AggregateRating', ratingValue: book.rating } }}
       />
       <div className="grid gap-8 md:grid-cols-[250px_1fr]">
@@ -60,7 +66,7 @@ export default function BookPage({ book, chapters, translations = [], isFallback
                 {LANGUAGE_OPTIONS.map((option) => {
                   const translation = translations.find((item) => item.language === option.code);
                   if (!translation) return null;
-                  const href = `/book/${book.slug}${option.code === 'hi' ? '?lang=hi' : ''}`;
+                  const href = buildBookPath(book.slug, option.code);
                   const active = translation.language === book.language;
                   return (
                     <Link key={option.code} href={href} className={`rounded-full px-3 py-1.5 ${active ? 'bg-brand-600 text-white dark:bg-sky-400 dark:text-slate-950' : 'text-slate-600 dark:text-slate-300'}`}>
@@ -105,9 +111,24 @@ export default function BookPage({ book, chapters, translations = [], isFallback
   );
 }
 
-export async function getServerSideProps({ params, query }) {
+export async function getServerSideProps({ params, query, resolvedUrl }) {
   try {
-    const { data } = await api.get(`/books/${params.slug}`, { params: { lang: query.lang || 'en' } });
+    const requestedLanguage = query.lang || 'en';
+    const { data } = await api.get(`/books/${params.slug}`, { params: { lang: requestedLanguage } });
+    const book = data.book || null;
+
+    if (book) {
+      const canonicalPath = buildBookPath(book.slug, book.language);
+      if (resolvedUrl !== canonicalPath) {
+        return {
+          redirect: {
+            destination: canonicalPath,
+            permanent: true
+          }
+        };
+      }
+    }
+
     return { props: { ...data, isFallback: false } };
   } catch (_error) {
     return { props: { book: null, chapters: [], translations: [], isFallback: true } };
