@@ -7,6 +7,7 @@ const SITEMAP_FETCH_TIMEOUT_MS = 45000;
 const SITEMAP_RETRY_DELAYS_MS = [0, 1500, 3000, 5000];
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const XML_DECLARATION = '<?xml version="1.0" encoding="UTF-8"?>';
+const XML_STYLESHEET_DECLARATION = '<?xml-stylesheet type="text/xsl" href="/sitemap.xsl"?>';
 const XML_URLSET_OPEN = '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">';
 const XML_URLSET_CLOSE = '</urlset>';
 
@@ -150,7 +151,7 @@ function buildSitemapDocument(entries) {
         .filter(Boolean)
     : [];
 
-  return `${XML_DECLARATION}\n${XML_URLSET_OPEN}\n${safeEntries.join('\n')}\n${XML_URLSET_CLOSE}\n`;
+  return `${XML_DECLARATION}\n${XML_STYLESHEET_DECLARATION}\n${XML_URLSET_OPEN}\n${safeEntries.join('\n')}\n${XML_URLSET_CLOSE}\n`;
 }
 
 function getGroupSharedSlug(variants) {
@@ -231,7 +232,8 @@ export function validateSitemapXml(xml) {
   }
 
   const xmlWithoutDeclaration = trimmedXml.slice(XML_DECLARATION.length).trim();
-  if (!xmlWithoutDeclaration.startsWith(XML_URLSET_OPEN)) {
+  const xmlWithoutProcessingInstructions = xmlWithoutDeclaration.replace(/^(<\?[\s\S]*?\?>\s*)+/, '');
+  if (!xmlWithoutProcessingInstructions.startsWith(XML_URLSET_OPEN)) {
     throw new Error('Sitemap XML contains content before the root element');
   }
 
