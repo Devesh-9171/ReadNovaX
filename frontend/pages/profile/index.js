@@ -58,12 +58,6 @@ export default function ProfilePage() {
     loadProfile();
   }, [loadProfile]);
 
-  useEffect(() => {
-    if (user?.role === 'admin') {
-      router.replace('/admin');
-    }
-  }, [router, user?.role]);
-
   const handleLogout = async () => {
     await clearAuthState();
     router.push('/');

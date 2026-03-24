@@ -63,7 +63,6 @@ export function AuthProvider({ children }) {
   }, [fetchCurrentUser]);
 
   const refreshUser = useCallback(() => fetchCurrentUser(token), [fetchCurrentUser, token]);
-
   useEffect(() => {
     const nextToken = getStoredToken();
     setTokenState(nextToken);

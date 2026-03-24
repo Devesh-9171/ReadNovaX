@@ -180,7 +180,6 @@ function EmptyAdminState() {
 export default function AdminPage() {
   const { user, token, loading: authLoading, refreshUser } = useAuth();
   const router = useRouter();
-
   const [stats, setStats] = useState(null);
   const [books, setBooks] = useState([]);
   const [blogPosts, setBlogPosts] = useState([]);
