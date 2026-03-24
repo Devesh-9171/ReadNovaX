@@ -12,7 +12,7 @@ const initialAuthorForm = {
   penName: '',
   bio: '',
   paymentDetails: '',
-  idVerification: '',
+  idImageFile: null,
   agreeToTerms: false
 };
 
@@ -26,6 +26,7 @@ export default function ProfilePage() {
   const [otp, setOtp] = useState('');
   const [verifyingOtp, setVerifyingOtp] = useState(false);
   const [resendingOtp, setResendingOtp] = useState(false);
+  const [showAuthorForm, setShowAuthorForm] = useState(false);
   const router = useRouter();
   const { user, token, refreshUser, clearAuthState, setToken } = useAuth();
 
@@ -42,8 +43,7 @@ export default function ProfilePage() {
         fullName: currentUser?.authorProfile?.fullName || '',
         penName: currentUser?.authorProfile?.penName || '',
         bio: currentUser?.authorProfile?.bio || '',
-        paymentDetails: currentUser?.authorProfile?.paymentDetails || '',
-        idVerification: currentUser?.authorProfile?.idVerification || ''
+        paymentDetails: currentUser?.authorProfile?.paymentDetails || ''
       }));
     } catch (err) {
       setError(err.message || 'Failed to load profile');
@@ -72,8 +72,25 @@ export default function ProfilePage() {
 
     try {
       setSubmittingAuthor(true);
-      await api.post('/user/author/request', authorForm, { headers: { Authorization: `Bearer ${token}` } });
+      if (!isEmailVerified) {
+        throw new Error('Please verify your email before applying as author.');
+      }
+      if (!authorForm.idImageFile && !me?.authorProfile?.idVerification) {
+        throw new Error('Government ID image is required.');
+      }
+
+      const payload = new FormData();
+      payload.append('fullName', authorForm.fullName.trim());
+      payload.append('penName', authorForm.penName.trim());
+      payload.append('bio', authorForm.bio.trim());
+      payload.append('paymentDetails', (authorForm.paymentDetails || '').trim());
+      payload.append('agreeToTerms', String(Boolean(authorForm.agreeToTerms)));
+      if (authorForm.idImageFile) payload.append('idImage', authorForm.idImageFile);
+
+      await api.post('/user/author/request', payload, { headers: { Authorization: `Bearer ${token}` } });
       setSuccess('Author request submitted. Waiting for admin approval.');
+      setShowAuthorForm(false);
+      setAuthorForm((current) => ({ ...current, idImageFile: null, agreeToTerms: false }));
       await loadProfile();
     } catch (requestError) {
       setError(requestError.message || 'Could not submit author request.');
@@ -199,24 +216,47 @@ export default function ProfilePage() {
           )}
 
           {me.role === 'user' && (
-            <form onSubmit={submitAuthorRequest} className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
               <h2 className="text-xl font-semibold">Become Author</h2>
               <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Submit once. Admin will approve or reject your request.</p>
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <input className={INPUT_CLASS} placeholder="Full name" value={authorForm.fullName} onChange={(e) => setAuthorForm((c) => ({ ...c, fullName: e.target.value }))} required />
-                <input className={INPUT_CLASS} placeholder="Pen name" value={authorForm.penName} onChange={(e) => setAuthorForm((c) => ({ ...c, penName: e.target.value }))} required />
-              </div>
-              <textarea className={`${INPUT_CLASS} mt-3 min-h-[100px]`} placeholder="Bio" value={authorForm.bio} onChange={(e) => setAuthorForm((c) => ({ ...c, bio: e.target.value }))} required />
-              <input className={`${INPUT_CLASS} mt-3`} placeholder="Payment details (optional)" value={authorForm.paymentDetails} onChange={(e) => setAuthorForm((c) => ({ ...c, paymentDetails: e.target.value }))} />
-              <textarea className={`${INPUT_CLASS} mt-3 min-h-[90px]`} placeholder="Optional ID verification details" value={authorForm.idVerification} onChange={(e) => setAuthorForm((c) => ({ ...c, idVerification: e.target.value }))} />
-              <label className="mt-3 flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={authorForm.agreeToTerms} onChange={(e) => setAuthorForm((c) => ({ ...c, agreeToTerms: e.target.checked }))} />
-                I agree to Terms & Conditions
-              </label>
-              <button disabled={submittingAuthor || authorStatus === 'pending' || !authorForm.agreeToTerms || !isEmailVerified} className="mt-4 rounded-full bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60">
-                {submittingAuthor ? 'Submitting...' : authorStatus === 'pending' ? 'Request Pending' : 'Submit Author Request'}
+              <button
+                type="button"
+                disabled={authorStatus === 'pending' || !isEmailVerified}
+                onClick={() => setShowAuthorForm((prev) => !prev)}
+                className="mt-4 rounded-full bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {authorStatus === 'pending' ? 'Request Pending' : showAuthorForm ? 'Hide Author Form' : 'Apply for Author'}
               </button>
-            </form>
+              {!isEmailVerified ? <p className="mt-3 text-sm text-amber-700 dark:text-amber-300">Verify your email to apply for author access.</p> : null}
+
+              {showAuthorForm ? (
+                <form onSubmit={submitAuthorRequest} className="mt-4">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <input className={INPUT_CLASS} placeholder="Full name" value={authorForm.fullName} onChange={(e) => setAuthorForm((c) => ({ ...c, fullName: e.target.value }))} required />
+                    <input className={INPUT_CLASS} placeholder="Pen name" value={authorForm.penName} onChange={(e) => setAuthorForm((c) => ({ ...c, penName: e.target.value }))} required />
+                  </div>
+                  <textarea className={`${INPUT_CLASS} mt-3 min-h-[100px]`} placeholder="Bio (optional)" value={authorForm.bio} onChange={(e) => setAuthorForm((c) => ({ ...c, bio: e.target.value }))} />
+                  <input className={`${INPUT_CLASS} mt-3`} placeholder="Payment details (optional)" value={authorForm.paymentDetails} onChange={(e) => setAuthorForm((c) => ({ ...c, paymentDetails: e.target.value }))} />
+                  <div className="mt-3">
+                    <label className="mb-1 block text-sm font-medium">Government ID image *</label>
+                    <input
+                      className={INPUT_CLASS}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      onChange={(e) => setAuthorForm((c) => ({ ...c, idImageFile: e.target.files?.[0] || null }))}
+                      required={!me?.authorProfile?.idVerification}
+                    />
+                  </div>
+                  <label className="mt-3 flex items-center gap-2 text-sm">
+                    <input type="checkbox" checked={authorForm.agreeToTerms} onChange={(e) => setAuthorForm((c) => ({ ...c, agreeToTerms: e.target.checked }))} />
+                    I agree to Terms & Conditions
+                  </label>
+                  <button disabled={submittingAuthor || !authorForm.agreeToTerms || !isEmailVerified} className="mt-4 rounded-full bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60">
+                    {submittingAuthor ? 'Submitting...' : 'Submit Author Request'}
+                  </button>
+                </form>
+              ) : null}
+            </div>
           )}
 
           <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">

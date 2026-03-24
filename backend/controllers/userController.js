@@ -2,6 +2,7 @@ const User = require('../models/User');
 const Book = require('../models/Book');
 const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
+const { uploadImageBuffer } = require('../utils/cloudinaryAssets');
 
 exports.getMe = asyncHandler(async (req, res) => {
   const user = await User.findById(req.user.id)
@@ -66,7 +67,7 @@ exports.saveReadingProgress = asyncHandler(async (req, res) => {
 });
 
 exports.requestAuthorRole = asyncHandler(async (req, res) => {
-  const { fullName, penName, bio, paymentDetails, idVerification, agreeToTerms } = req.body;
+  const { fullName, penName, bio, paymentDetails, agreeToTerms } = req.body;
   const user = await User.findById(req.user.id);
   if (!user) throw new AppError('User not found', 404);
 
@@ -74,12 +75,22 @@ exports.requestAuthorRole = asyncHandler(async (req, res) => {
     throw new AppError('Please verify your email before applying as author', 400);
   }
 
-  if (!fullName || !penName || !bio) {
-    throw new AppError('fullName, penName, and bio are required', 400);
+  if (!fullName || !penName) {
+    throw new AppError('fullName and penName are required', 400);
+  }
+
+  if (!req.file && !user.authorProfile?.idVerification) {
+    throw new AppError('Government ID image is required', 400);
   }
 
   if (!agreeToTerms) {
     throw new AppError('Terms not accepted', 400);
+  }
+
+  let idVerification = user.authorProfile?.idVerification || '';
+  if (req.file) {
+    const upload = await uploadImageBuffer({ file: req.file, folder: 'readnovax/author-ids' });
+    idVerification = upload.secureUrl;
   }
 
   user.authorStatus = 'pending';
@@ -87,9 +98,9 @@ exports.requestAuthorRole = asyncHandler(async (req, res) => {
     ...user.authorProfile,
     fullName: String(fullName).trim(),
     penName: String(penName).trim(),
-    bio: String(bio).trim(),
+    bio: String(bio || '').trim(),
     paymentDetails: String(paymentDetails || '').trim(),
-    idVerification: String(idVerification || '').trim() || user.authorProfile?.idVerification
+    idVerification: String(idVerification || '').trim()
   };
 
   await user.save();

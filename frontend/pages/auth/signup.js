@@ -19,7 +19,9 @@ export default function SignupPage() {
 
   const submit = async (e) => {
     e.preventDefault();
+    if (loading) return;
     setError('');
+    setSuccess('');
 
     if (!form.username.trim() || !form.email.trim() || !form.password) {
       setError('All fields are required.');
@@ -37,6 +39,19 @@ export default function SignupPage() {
       setAwaitingOtp(true);
       setSuccess('Signup successful. Enter the 6-digit OTP sent to your email.');
     } catch (err) {
+      // If signup timed out, account may still be created. Attempt OTP resend to recover gracefully.
+      if (err?.isTimeout) {
+        try {
+          await api.post('/auth/resend-otp', { email: form.email.trim() });
+          setPendingEmail(form.email.trim());
+          setAwaitingOtp(true);
+          setSuccess('Account created. OTP has been sent to your email. Please verify to continue.');
+          setError('');
+          return;
+        } catch (_resendErr) {
+          // Fall through to normal error handling when resend fails.
+        }
+      }
       setError(err.message || 'Signup failed');
     } finally {
       setLoading(false);
@@ -45,7 +60,9 @@ export default function SignupPage() {
 
   const verifyOtp = async (event) => {
     event.preventDefault();
+    if (loading) return;
     setError('');
+    setSuccess('');
     try {
       setLoading(true);
       const { data } = await api.post('/auth/verify-email', { email: pendingEmail, otp: otp.trim() });
@@ -59,7 +76,9 @@ export default function SignupPage() {
   };
 
   const resendOtp = async () => {
+    if (loading || !pendingEmail) return;
     setError('');
+    setSuccess('');
     try {
       setLoading(true);
       await api.post('/auth/resend-otp', { email: pendingEmail });
