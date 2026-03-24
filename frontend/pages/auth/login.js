@@ -24,6 +24,8 @@ export default function LoginPage() {
       setLoading(true);
       const { data } = await api.post('/auth/login', { email: form.email.trim(), password: form.password });
       localStorage.setItem('token', data.token);
+      localStorage.removeItem('guest-reading-history');
+      localStorage.removeItem('guest-completed-views');
       router.push('/profile');
     } catch (err) {
       setError(err.message || 'Login failed');

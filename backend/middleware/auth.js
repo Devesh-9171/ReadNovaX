@@ -13,4 +13,19 @@ function auth(requiredRole = null) {
   };
 }
 
+function optionalAuth(req, _res, next) {
+  const authHeader = req.headers.authorization || '';
+  if (!authHeader.startsWith('Bearer ')) {
+    return next();
+  }
+
+  return authMiddleware(req, _res, (error) => {
+    if (error) {
+      req.user = null;
+    }
+    return next();
+  });
+}
+
 module.exports = auth;
+module.exports.optionalAuth = optionalAuth;

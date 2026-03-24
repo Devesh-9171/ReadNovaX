@@ -6,11 +6,16 @@ const bookSchema = new mongoose.Schema(
     title: { type: String, required: true, trim: true },
     slug: { type: String, required: true, index: true },
     author: { type: String, required: true, trim: true },
+    authorUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
     category: {
       type: String,
       required: true,
       enum: ['action', 'romance', 'comedy', 'mystery', 'finance']
     },
+    contentType: { type: String, enum: ['short_story', 'long_story'], default: 'long_story', index: true },
+    tags: [{ type: String, trim: true, lowercase: true }],
+    status: { type: String, enum: ['review', 'published', 'rejected'], default: 'published', index: true },
+    rejectionReason: { type: String, trim: true, maxlength: 1000 },
     description: { type: String, required: true },
     coverImage: { type: String, required: true },
     coverImagePublicId: { type: String, trim: true },
@@ -21,12 +26,16 @@ const bookSchema = new mongoose.Schema(
     viewsLast24h: { type: Number, default: 0 },
     viewsLast7d: { type: Number, default: 0 },
     trendingScore: { type: Number, default: 0, index: true },
-    featured: { type: Boolean, default: false }
+    readingTimeMinutes: { type: Number, default: 0 },
+    featured: { type: Boolean, default: false },
+    isCompleted: { type: Boolean, default: false, index: true },
+    completedAt: { type: Date },
+    publishedAt: { type: Date }
   },
   { timestamps: true }
 );
 
-bookSchema.pre('save', function setDefaultLanguageAndGroup(next) {
+bookSchema.pre('save', function setDefaults(next) {
   if (!this.language) {
     this.language = DEFAULT_LANGUAGE;
   }
@@ -35,11 +44,21 @@ bookSchema.pre('save', function setDefaultLanguageAndGroup(next) {
     this.groupId = this._id.toString();
   }
 
+  if (!Array.isArray(this.tags)) {
+    this.tags = [];
+  }
+
+  this.tags = Array.from(new Set(this.tags.map((tag) => String(tag || '').trim().toLowerCase()).filter(Boolean)));
+
+  if (this.status === 'published' && !this.publishedAt) {
+    this.publishedAt = new Date();
+  }
+
   next();
 });
 
 bookSchema.index(
-  { title: 'text', author: 'text', category: 'text' },
+  { title: 'text', author: 'text', category: 'text', tags: 'text' },
   { default_language: 'none', language_override: 'searchLanguage' }
 );
 bookSchema.index({ category: 1, totalViews: -1 });

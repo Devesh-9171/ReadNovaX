@@ -6,7 +6,7 @@ const AppError = require('../utils/AppError');
 const config = require('../config');
 
 function signToken(user) {
-  return jwt.sign({ id: user._id.toString(), role: user.role }, config.jwtSecret, { expiresIn: '7d' });
+  return jwt.sign({ id: user._id.toString(), role: user.role, name: user.name }, config.jwtSecret, { expiresIn: '7d' });
 }
 
 function sanitizeUser(user) {
@@ -16,6 +16,8 @@ function sanitizeUser(user) {
     username: user.name,
     email: user.email,
     role: user.role,
+    authorStatus: user.authorStatus,
+    authorProfile: user.authorProfile || {},
     createdAt: user.createdAt
   };
 }

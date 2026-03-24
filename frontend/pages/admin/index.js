@@ -27,7 +27,9 @@ const initialBookForm = {
   coverImageFile: null,
   uploadedCoverImage: '',
   language: 'en',
-  groupId: ''
+  groupId: '',
+  contentType: 'long_story',
+  tags: ''
 };
 
 const initialChapterForm = {
@@ -171,6 +173,7 @@ function EmptyAdminState() {
           Go to login
         </Link>
       </div>
+
     </Layout>
   );
 }
@@ -201,6 +204,8 @@ export default function AdminPage() {
   const [savingBlogEdit, setSavingBlogEdit] = useState(false);
   const [deletingBookId, setDeletingBookId] = useState('');
   const [deletingBlogId, setDeletingBlogId] = useState('');
+  const [authorRequests, setAuthorRequests] = useState([]);
+  const [reviewQueue, setReviewQueue] = useState([]);
   const [editBookImageFile, setEditBookImageFile] = useState(null);
   const [editBlogImageFile, setEditBlogImageFile] = useState(null);
 
@@ -238,16 +243,20 @@ export default function AdminPage() {
     setListError('');
 
     try {
-      const [statsResponse, booksResponse, blogsResponse] = await Promise.all([
+      const [statsResponse, booksResponse, blogsResponse, authorRequestsResponse, reviewQueueResponse] = await Promise.all([
         api.get('/admin/stats', { headers }),
         api.get('/books', { params: { limit: 100, includeAllLanguages: true } }),
-        api.get('/admin/blogs', { headers })
+        api.get('/admin/blogs', { headers }),
+        api.get('/admin/author-requests', { headers }),
+        api.get('/admin/content/review-queue', { headers })
       ]);
 
       const nextBooks = booksResponse.data.data || [];
       setStats(statsResponse.data);
       setBooks(nextBooks);
       setBlogPosts(blogsResponse.data.data || []);
+      setAuthorRequests(authorRequestsResponse.data.data || []);
+      setReviewQueue(reviewQueueResponse.data.data || []);
       setChapterForm((current) => ({
         ...current,
         bookId: current.bookId || nextBooks[0]?._id || ''
@@ -291,6 +300,8 @@ export default function AdminPage() {
       payload.append('description', bookForm.description.trim());
       payload.append('category', bookForm.category.trim());
       payload.append('language', bookForm.language);
+      payload.append('contentType', bookForm.contentType);
+      payload.append('tags', bookForm.tags);
       payload.append('coverImage', bookForm.coverImageFile);
       if (bookForm.groupId) payload.append('groupId', bookForm.groupId);
 
@@ -744,6 +755,41 @@ export default function AdminPage() {
           </div>
         )}
       </section>
+
+      <section className={CARD_CLASS}>
+        <h2 className="text-xl font-semibold">Author Requests</h2>
+        <div className="mt-3 space-y-2">
+          {authorRequests.length === 0 ? <p className="text-sm text-slate-500">No pending requests.</p> : authorRequests.map((request) => (
+            <div key={request._id} className="rounded-xl border border-slate-200 p-3 dark:border-slate-800">
+              <p className="font-semibold">{request.authorProfile?.penName || request.name} <span className="text-xs text-slate-500">({request.email})</span></p>
+              <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{request.authorProfile?.bio}</p>
+              <div className="mt-2 flex gap-2">
+                <button type="button" onClick={async ()=>{await api.post(`/admin/author-requests/${request._id}/review`,{action:'approve'},{headers:getAuthHeaders()});loadDashboard();}} className="rounded-full bg-emerald-600 px-3 py-1 text-xs font-semibold text-white">Approve</button>
+                <button type="button" onClick={async ()=>{await api.post(`/admin/author-requests/${request._id}/review`,{action:'reject'},{headers:getAuthHeaders()});loadDashboard();}} className="rounded-full bg-red-600 px-3 py-1 text-xs font-semibold text-white">Reject</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className={`${CARD_CLASS} mt-6`}>
+        <h2 className="text-xl font-semibold">Content Review Queue</h2>
+        <div className="mt-3 space-y-2">
+          {reviewQueue.length === 0 ? <p className="text-sm text-slate-500">No pending content.</p> : reviewQueue.map((item) => (
+            <div key={item._id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 p-3 dark:border-slate-800">
+              <div>
+                <p className="font-semibold">{item.title}</p>
+                <p className="text-xs text-slate-500">{item.contentType} · #{(item.tags || []).join(' #')}</p>
+              </div>
+              <div className="flex gap-2">
+                <button type="button" onClick={async ()=>{await api.post(`/admin/content/${item._id}/review`,{status:'published'},{headers:getAuthHeaders()});loadDashboard();}} className="rounded-full bg-emerald-600 px-3 py-1 text-xs font-semibold text-white">Publish</button>
+                <button type="button" onClick={async ()=>{await api.post(`/admin/content/${item._id}/review`,{status:'rejected'},{headers:getAuthHeaders()});loadDashboard();}} className="rounded-full bg-red-600 px-3 py-1 text-xs font-semibold text-white">Reject</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
     </Layout>
   );
 }
