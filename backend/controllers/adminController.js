@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 const Book = require('../models/Book');
 const Chapter = require('../models/Chapter');
 const BlogPost = require('../models/BlogPost');
+const User = require('../models/User');
 const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
 const { cache } = require('../utils/cache');
@@ -14,6 +15,17 @@ const { uploadImageBuffer, deleteImageByPublicId } = require('../utils/cloudinar
 
 function generateSlug(value) {
   return slugify(String(value || ''), { lower: true, strict: true, trim: true });
+}
+
+function parseTags(inputTags) {
+  if (Array.isArray(inputTags)) {
+    return inputTags.map((tag) => String(tag || '').replace(/^#/, '').trim().toLowerCase()).filter(Boolean);
+  }
+
+  return String(inputTags || '')
+    .split(',')
+    .map((tag) => tag.replace(/^#/, '').trim().toLowerCase())
+    .filter(Boolean);
 }
 
 async function resolveGroupId(groupId) {
@@ -33,13 +45,7 @@ async function ensureUniqueBlogSlug(title, excludeId) {
 
   let slug = baseSlug;
   let counter = 1;
-
-  while (
-    await BlogPost.exists({
-      slug,
-      ...(excludeId ? { _id: { $ne: excludeId } } : {})
-    })
-  ) {
+  while (await BlogPost.exists({ slug, ...(excludeId ? { _id: { $ne: excludeId } } : {}) })) {
     counter += 1;
     slug = `${baseSlug}-${counter}`;
   }
@@ -50,23 +56,18 @@ async function ensureUniqueBlogSlug(title, excludeId) {
 exports.createBook = asyncHandler(async (req, res) => {
   const data = req.body;
   const language = normalizeLanguage(data.language, DEFAULT_LANGUAGE);
-  if (shouldRequireExistingGroup(language) && !data.groupId) {
-    throw new AppError('Translated books must be linked to an existing translation group', 400);
-  }
+  if (shouldRequireExistingGroup(language) && !data.groupId) throw new AppError('Translated books must be linked to an existing translation group', 400);
+  if (!req.file && !data.coverImage) throw new AppError('Book cover image is required', 400);
 
-  if (!req.file && !data.coverImage) {
-    throw new AppError('Book cover image is required', 400);
-  }
+  const normalizedTags = parseTags(data.tags);
+  if (normalizedTags.length === 0) throw new AppError('At least one tag is required', 400);
 
   const groupId = await resolveGroupId(data.groupId);
   const duplicateLanguage = await Book.findOne({ groupId, language }).lean();
-  if (duplicateLanguage) {
-    throw new AppError('This language already exists for the selected book group', 409);
-  }
+  if (duplicateLanguage) throw new AppError('This language already exists for the selected book group', 409);
 
   let coverImage = data.coverImage;
   let coverImagePublicId = data.coverImagePublicId;
-
   if (req.file) {
     const upload = await uploadImageBuffer({ file: req.file, folder: 'readnovax/books' });
     coverImage = upload.secureUrl;
@@ -79,6 +80,9 @@ exports.createBook = asyncHandler(async (req, res) => {
     language,
     groupId,
     slug,
+    tags: normalizedTags,
+    contentType: data.contentType === 'short_story' ? 'short_story' : 'long_story',
+    status: ['review', 'published', 'rejected'].includes(data.status) ? data.status : 'published',
     coverImage,
     coverImagePublicId
   });
@@ -99,14 +103,17 @@ exports.updateBook = asyncHandler(async (req, res) => {
   const nextGroupId = data.groupId ? await resolveGroupId(data.groupId) : previousGroupId;
 
   const duplicateLanguage = await Book.findOne({ groupId: nextGroupId, language: nextLanguage, _id: { $ne: existingBook._id } }).lean();
-  if (duplicateLanguage) {
-    throw new AppError('This language already exists for the selected book group', 409);
-  }
+  if (duplicateLanguage) throw new AppError('This language already exists for the selected book group', 409);
 
   const nextTitle = data.title ? String(data.title).trim() : existingBook.title;
   data.slug = await buildSharedBookSlug({ groupId: nextGroupId, title: nextTitle, language: nextLanguage });
   data.language = nextLanguage;
   data.groupId = nextGroupId;
+  if (typeof data.tags !== 'undefined') {
+    const parsedTags = parseTags(data.tags);
+    if (parsedTags.length === 0) throw new AppError('At least one tag is required', 400);
+    data.tags = parsedTags;
+  }
 
   if (req.file) {
     const upload = await uploadImageBuffer({ file: req.file, folder: 'readnovax/books' });
@@ -118,9 +125,7 @@ exports.updateBook = asyncHandler(async (req, res) => {
   const book = await Book.findByIdAndUpdate(req.params.bookId, data, { new: true });
   await Chapter.updateMany({ bookId: book._id }, { $set: { language: book.language } });
   await syncGroupBookSlugs(nextGroupId, { title: nextTitle, language: nextLanguage });
-  if (previousGroupId !== nextGroupId) {
-    await syncGroupBookSlugs(previousGroupId);
-  }
+  if (previousGroupId !== nextGroupId) await syncGroupBookSlugs(previousGroupId);
 
   const [sharedBook] = await applySharedSlugToBooks([book.toObject ? book.toObject() : book]);
   cache.flushAll();
@@ -163,7 +168,6 @@ exports.getBlogs = asyncHandler(async (_req, res) => {
 
 exports.createBlog = asyncHandler(async (req, res) => {
   const { title, description, coverImage, content, contentHtml } = req.body;
-
   if (!title || !description || !req.file || !(content || contentHtml)) {
     throw new AppError('title, description, cover image file, and content are required', 400);
   }
@@ -192,7 +196,6 @@ exports.updateBlog = asyncHandler(async (req, res) => {
 
   const { title, description, coverImage, content, contentHtml } = req.body;
   const nextTitle = title ? String(title).trim() : post.title;
-
   post.title = nextTitle;
   post.slug = await ensureUniqueBlogSlug(nextTitle, post._id);
   if (description) post.description = String(description).trim();
@@ -213,7 +216,6 @@ exports.updateBlog = asyncHandler(async (req, res) => {
 
   await post.save();
   cache.flushAll();
-
   res.json({ success: true, post });
 });
 
@@ -222,18 +224,19 @@ exports.deleteBlog = asyncHandler(async (req, res) => {
   if (!post) throw new AppError('Blog post not found', 404);
 
   await deleteImageByPublicId(post.coverImagePublicId);
-
   cache.flushAll();
   res.json({ success: true, message: 'Blog post deleted' });
 });
 
 exports.dashboardStats = asyncHandler(async (_req, res) => {
-  const [totalBooks, totalChapters, totalBlogs, totalViews, topBooks] = await Promise.all([
+  const [totalBooks, totalChapters, totalBlogs, totalViews, topBooks, authorRequests, reviewQueue] = await Promise.all([
     Book.countDocuments(),
     Chapter.countDocuments(),
     BlogPost.countDocuments(),
     Book.aggregate([{ $group: { _id: null, views: { $sum: '$totalViews' } } }]),
-    Book.find().sort({ totalViews: -1 }).limit(5).select('title slug totalViews rating category language').lean()
+    Book.find().sort({ totalViews: -1 }).limit(5).select('title slug totalViews rating category language').lean(),
+    User.countDocuments({ authorStatus: 'pending' }),
+    Book.countDocuments({ status: 'review' })
   ]);
 
   res.json({
@@ -241,6 +244,78 @@ exports.dashboardStats = asyncHandler(async (_req, res) => {
     totalChapters,
     totalBlogs,
     totalViews: totalViews[0]?.views || 0,
+    authorRequests,
+    reviewQueue,
     topBooks
   });
+});
+
+exports.getAuthorRequests = asyncHandler(async (_req, res) => {
+  const requests = await User.find({ authorStatus: 'pending' })
+    .sort({ updatedAt: 1 })
+    .select('name email authorStatus authorProfile createdAt updatedAt')
+    .lean();
+
+  res.json({ success: true, data: requests });
+});
+
+exports.reviewAuthorRequest = asyncHandler(async (req, res) => {
+  const { action } = req.body;
+  const user = await User.findById(req.params.userId);
+  if (!user) throw new AppError('User not found', 404);
+
+  if (action === 'approve') {
+    user.authorStatus = 'approved';
+    user.role = 'author';
+  } else if (action === 'reject') {
+    user.authorStatus = 'rejected';
+    user.role = 'user';
+  } else {
+    throw new AppError('action must be approve or reject', 400);
+  }
+
+  await user.save();
+  res.json({ success: true, userId: user._id, role: user.role, authorStatus: user.authorStatus });
+});
+
+exports.getReviewQueue = asyncHandler(async (_req, res) => {
+  const items = await Book.find({ status: 'review' })
+    .sort({ updatedAt: 1 })
+    .select('title author slug contentType tags status language updatedAt')
+    .lean();
+
+  res.json({ success: true, data: items });
+});
+
+exports.reviewContent = asyncHandler(async (req, res) => {
+  const { status, rejectionReason } = req.body;
+  if (!['published', 'rejected', 'review'].includes(status)) {
+    throw new AppError('status must be review, published, or rejected', 400);
+  }
+
+  const book = await Book.findByIdAndUpdate(
+    req.params.bookId,
+    {
+      status,
+      rejectionReason: status === 'rejected' ? String(rejectionReason || 'Rejected by admin').trim() : '',
+      ...(status === 'published' ? { publishedAt: new Date() } : {})
+    },
+    { new: true }
+  );
+
+  if (!book) throw new AppError('Content not found', 404);
+  cache.flushAll();
+  res.json({ success: true, data: book });
+});
+
+exports.markBookFinished = asyncHandler(async (req, res) => {
+  const book = await Book.findByIdAndUpdate(
+    req.params.bookId,
+    { isCompleted: true, completedAt: new Date() },
+    { new: true }
+  ).select('title slug isCompleted completedAt');
+
+  if (!book) throw new AppError('Book not found', 404);
+  cache.flushAll();
+  res.json({ success: true, data: book });
 });

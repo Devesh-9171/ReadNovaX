@@ -12,7 +12,7 @@ function authMiddleware(req, _res, next) {
 
   try {
     const payload = jwt.verify(token, config.jwtSecret);
-    req.user = { id: payload.id, role: payload.role };
+    req.user = { id: payload.id, role: payload.role, name: payload.name };
     return next();
   } catch (_error) {
     return next(new AppError('Unauthorized: invalid token', 401));
@@ -27,4 +27,13 @@ function requireAdmin(req, _res, next) {
   return next();
 }
 
-module.exports = { authMiddleware, requireAdmin };
+function requireRoles(roles = []) {
+  return (req, _res, next) => {
+    if (!roles.includes(req.user?.role)) {
+      return next(new AppError('Forbidden', 403));
+    }
+    return next();
+  };
+}
+
+module.exports = { authMiddleware, requireAdmin, requireRoles };

@@ -1,12 +1,24 @@
 const slugify = require('slugify');
 const Book = require('../models/Book');
 const Chapter = require('../models/Chapter');
+const User = require('../models/User');
 const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
 const { cache, cacheKey } = require('../utils/cache');
 const { DEFAULT_LANGUAGE, normalizeLanguage } = require('../utils/language');
 const { applySharedSlugToBooks } = require('../utils/bookSlug');
 const { uploadImageBuffer } = require('../utils/cloudinaryAssets');
+
+function parseTags(inputTags) {
+  if (Array.isArray(inputTags)) {
+    return inputTags.map((tag) => String(tag || '').replace(/^#/, '').trim().toLowerCase()).filter(Boolean);
+  }
+
+  return String(inputTags || '')
+    .split(',')
+    .map((tag) => tag.replace(/^#/, '').trim().toLowerCase())
+    .filter(Boolean);
+}
 
 exports.createChapter = asyncHandler(async (req, res) => {
   const { bookId, chapterNumber, title, content } = req.body;
@@ -15,7 +27,7 @@ exports.createChapter = asyncHandler(async (req, res) => {
     throw new AppError('bookId, chapterNumber, title, and content are required', 400);
   }
 
-  const book = await Book.findById(bookId).select('_id language');
+  const book = await Book.findById(bookId).select('_id language status contentType');
   if (!book) throw new AppError('Book not found', 404);
 
   const baseSlug = slugify(String(title).trim() || `chapter-${chapterNumber}`, { lower: true, strict: true }) || `chapter-${chapterNumber}`;
@@ -47,6 +59,9 @@ exports.createChapter = asyncHandler(async (req, res) => {
     imagePublicId
   });
 
+  const readingTimeMinutes = Math.max(1, Math.ceil(String(content).trim().split(/\s+/).length / 220));
+  await Book.updateOne({ _id: book._id }, { $set: { readingTimeMinutes } });
+
   cache.flushAll();
   res.status(201).json({ success: true, chapter });
 });
@@ -58,35 +73,29 @@ exports.getChapter = asyncHandler(async (req, res) => {
   const cached = cache.get(key);
   if (cached) return res.json(cached);
 
-  const seedBook = await Book.findOne({ slug }).lean();
+  const seedBook = await Book.findOne({ slug, status: 'published' }).lean();
   if (!seedBook) throw new AppError('Book not found', 404);
 
-  const activeBook = await Book.findOne({ groupId: seedBook.groupId || String(seedBook._id), language: requestedLanguage }).lean() || seedBook;
+  const activeBook = await Book.findOne({
+    groupId: seedBook.groupId || String(seedBook._id),
+    language: requestedLanguage,
+    status: 'published'
+  }).lean() || seedBook;
+
   const initialChapter = await Chapter.findOne({ bookId: seedBook._id, slug: chapterSlug }).lean();
   if (!initialChapter) throw new AppError('Chapter not found', 404);
 
-  const chapter = await Chapter.findOneAndUpdate(
+  const chapter = await Chapter.findOne(
     activeBook._id.equals?.(seedBook._id) || String(activeBook._id) === String(seedBook._id)
       ? { bookId: activeBook._id, slug: chapterSlug }
-      : { bookId: activeBook._id, chapterNumber: initialChapter.chapterNumber },
-    { $inc: { views: 1 } },
-    { new: true }
+      : { bookId: activeBook._id, chapterNumber: initialChapter.chapterNumber }
   ).lean();
 
   if (!chapter) throw new AppError('Chapter not found in the selected language', 404);
 
-  const book = await Book.findOneAndUpdate(
-    { _id: activeBook._id },
-    {
-      $inc: { totalViews: 1, viewsLast24h: 1, viewsLast7d: 1 }
-    },
-    { new: true }
-  ).lean();
+  const book = activeBook;
 
-  const nextTrendingScore = book.viewsLast24h * 3 + book.viewsLast7d * 2 + book.totalViews;
-  await Book.updateOne({ _id: book._id }, { $set: { trendingScore: nextTrendingScore } });
-
-  const translationBooks = await Book.find({ groupId: book.groupId || String(book._id) })
+  const translationBooks = await Book.find({ groupId: book.groupId || String(book._id), status: 'published' })
     .sort({ language: 1 })
     .select('title slug language groupId')
     .lean();
@@ -106,7 +115,7 @@ exports.getChapter = asyncHandler(async (req, res) => {
     Chapter.find({ bookId: book._id }).sort({ chapterNumber: 1 }).select('title slug chapterNumber').lean()
   ]);
 
-  const [sharedBook] = await applySharedSlugToBooks([{ ...book, trendingScore: nextTrendingScore }]);
+  const [sharedBook] = await applySharedSlugToBooks([book]);
   const sharedTranslations = await applySharedSlugToBooks(translationBooks);
   const chapterTranslations = sharedTranslations
     .map((translation) => {
@@ -122,16 +131,91 @@ exports.getChapter = asyncHandler(async (req, res) => {
     })
     .filter(Boolean);
 
+  let similarBooks = [];
+  if ((sharedBook?.tags || []).length > 0) {
+    similarBooks = await Book.find({
+      _id: { $ne: book._id },
+      groupId: { $ne: book.groupId },
+      status: 'published',
+      tags: { $in: sharedBook.tags }
+    })
+      .sort({ totalViews: -1, updatedAt: -1 })
+      .limit(5)
+      .select('title slug coverImage tags language')
+      .lean();
+
+    similarBooks = await applySharedSlugToBooks(similarBooks);
+  }
+
   const payload = {
-    book: sharedBook || { ...book, trendingScore: nextTrendingScore },
+    book: sharedBook || book,
     chapter,
     chapters,
     previousChapter,
     nextChapter,
     translations: sharedTranslations,
     chapterTranslations,
-    chapterNumber: chapter.chapterNumber
+    chapterNumber: chapter.chapterNumber,
+    similarBooks
   };
   cache.set(key, payload, 30);
   res.json(payload);
+});
+
+exports.completeChapterView = asyncHandler(async (req, res) => {
+  const { chapterId, progress = 100, status = 'read', tags, contentType, readingTimeMinutes } = req.body;
+  if (!chapterId) throw new AppError('chapterId is required', 400);
+
+  const chapter = await Chapter.findById(chapterId).select('_id bookId');
+  if (!chapter) throw new AppError('Chapter not found', 404);
+
+  const book = await Book.findById(chapter.bookId).select('_id totalViews viewsLast24h viewsLast7d tags contentType readingTimeMinutes status');
+  if (!book || book.status !== 'published') throw new AppError('Book not found', 404);
+
+  const incPayload = { totalViews: 1, viewsLast24h: 1, viewsLast7d: 1 };
+  const normalizedTags = parseTags(tags);
+  const updateBookPayload = {
+    $inc: incPayload,
+    $set: {
+      trendingScore: (book.viewsLast24h + 1) * 3 + (book.viewsLast7d + 1) * 2 + (book.totalViews + 1),
+      contentType: contentType || book.contentType || 'long_story',
+      readingTimeMinutes: Number(readingTimeMinutes) > 0 ? Number(readingTimeMinutes) : book.readingTimeMinutes
+    }
+  };
+
+  if (normalizedTags.length > 0) {
+    updateBookPayload.$set.tags = normalizedTags;
+  }
+
+  await Promise.all([
+    Chapter.updateOne({ _id: chapter._id }, { $inc: { views: 1 } }),
+    Book.updateOne({ _id: book._id }, updateBookPayload)
+  ]);
+
+  if (req.user?.id) {
+    const user = await User.findById(req.user.id);
+    if (user) {
+      const existing = user.readingHistory.find((item) => String(item.chapterId) === String(chapter._id));
+      if (existing) {
+        existing.progress = Number(progress) || 100;
+        existing.status = status === 'skipped' ? 'skipped' : 'read';
+        existing.lastReadAt = new Date();
+        existing.completedAt = new Date();
+        existing.bookId = chapter.bookId;
+      } else {
+        user.readingHistory.push({
+          bookId: chapter.bookId,
+          chapterId: chapter._id,
+          progress: Number(progress) || 100,
+          status: status === 'skipped' ? 'skipped' : 'read',
+          completedAt: new Date(),
+          lastReadAt: new Date()
+        });
+      }
+      await user.save();
+    }
+  }
+
+  cache.flushAll();
+  res.json({ success: true, message: 'Completed view tracked' });
 });

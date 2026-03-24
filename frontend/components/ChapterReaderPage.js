@@ -22,7 +22,7 @@ function getChapterHref(book, chapterSlug, language = book.language) {
   return `/book/${book.slug}/${chapterSlug}${language === 'hi' ? '?lang=hi' : ''}`;
 }
 
-export default function ChapterReaderPage({ book, chapter, chapters = [], previousChapter, nextChapter, translations = [], chapterTranslations = [], isFallback }) {
+export default function ChapterReaderPage({ book, chapter, chapters = [], previousChapter, nextChapter, translations = [], chapterTranslations = [], similarBooks = [], isFallback }) {
   const router = useRouter();
   const sentinelRef = useRef(null);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
@@ -30,6 +30,7 @@ export default function ChapterReaderPage({ book, chapter, chapters = [], previo
   const [toast, setToast] = useState('');
   const [progress, setProgress] = useState(0);
   const [visibleParagraphs, setVisibleParagraphs] = useState(8);
+  const [completionTracked, setCompletionTracked] = useState(false);
   const { theme, setTheme } = useTheme();
   const content = chapter?.content || '';
   const paragraphs = useMemo(() => content.split(/\n{2,}/).map((paragraph) => paragraph.trim()).filter(Boolean), [content]);
@@ -69,6 +70,57 @@ export default function ChapterReaderPage({ book, chapter, chapters = [], previo
     const timer = window.setTimeout(() => setToast(''), 1800);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
+
+  const saveGuestHistory = useCallback((status) => {
+    if (typeof window === 'undefined' || !chapter?._id) return;
+    const key = 'guest-reading-history';
+    const current = JSON.parse(localStorage.getItem(key) || '[]');
+    const next = current.filter((item) => item.chapterId !== chapter._id);
+    next.unshift({
+      chapterId: chapter._id,
+      chapterTitle: chapter.title,
+      bookId: book?._id,
+      bookTitle: book?.title,
+      status,
+      progress: status === 'read' ? 100 : Math.round(progress),
+      updatedAt: new Date().toISOString()
+    });
+    localStorage.setItem(key, JSON.stringify(next.slice(0, 80)));
+  }, [book?._id, book?.title, chapter?._id, chapter?.title, progress]);
+
+  const trackCompletedView = useCallback(async () => {
+    if (!chapter?._id || completionTracked) return;
+    const guestKey = 'guest-completed-views';
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : '';
+    const seen = typeof window !== 'undefined' ? JSON.parse(localStorage.getItem(guestKey) || '[]') : [];
+    if (!token && seen.includes(chapter._id)) return;
+
+    try {
+      await api.post('/chapters/complete-view', {
+        chapterId: chapter._id,
+        progress: 100,
+        status: 'read',
+        tags: book?.tags || [],
+        contentType: book?.contentType,
+        readingTimeMinutes: book?.readingTimeMinutes
+      }, token ? { headers: { Authorization: `Bearer ${token}` } } : undefined);
+
+      if (!token && typeof window !== 'undefined') {
+        localStorage.setItem(guestKey, JSON.stringify([...seen, chapter._id]));
+      }
+
+      if (token) {
+        await api.post('/user/progress', { bookId: book?._id, chapterId: chapter._id, progress: 100, status: 'read' }, { headers: { Authorization: `Bearer ${token}` } });
+      } else {
+        saveGuestHistory('read');
+      }
+
+      setCompletionTracked(true);
+    } catch (_error) {
+      // no-op to avoid interrupting reading flow
+    }
+  }, [book?._id, book?.contentType, book?.readingTimeMinutes, book?.tags, chapter?._id, completionTracked, saveGuestHistory]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
@@ -120,7 +172,16 @@ export default function ChapterReaderPage({ book, chapter, chapters = [], previo
 
   useEffect(() => {
     setVisibleParagraphs(8);
+    setCompletionTracked(false);
   }, [chapter?._id]);
+
+
+  useEffect(() => {
+    if (progress >= 99 && visibleParagraphs >= paragraphs.length && !completionTracked) {
+      trackCompletedView();
+    }
+  }, [completionTracked, paragraphs.length, progress, trackCompletedView, visibleParagraphs]);
+
 
   useEffect(() => {
     if (!sentinelRef.current || visibleParagraphs >= paragraphs.length) return undefined;
@@ -309,9 +370,22 @@ export default function ChapterReaderPage({ book, chapter, chapters = [], previo
                 <span className="mt-1 block">{nextChapter.title}</span>
               </Link>
             ) : (
-              <div className="rounded-2xl border border-dashed border-slate-300 px-4 py-4 text-sm text-slate-400 dark:border-slate-700">You reached the latest chapter.</div>
+              <div className="rounded-2xl border border-dashed border-slate-300 px-4 py-4 text-sm text-slate-400 dark:border-slate-700">{book.isCompleted ? 'This story is finished.' : 'You reached the latest chapter.'}</div>
             )}
           </div>
+
+          {!nextChapter && book.isCompleted && (similarBooks || []).length > 0 ? (
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">Similar books</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {similarBooks.map((item) => (
+                  <Link key={item._id} href={`/book/${item.slug}${item.language === 'hi' ? '?lang=hi' : ''}`} className="rounded-full border border-slate-300 px-3 py-1.5 text-sm hover:border-brand-500 hover:text-brand-600 dark:border-slate-700 dark:hover:border-sky-400">
+                    {item.title}
+                  </Link>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
     </Layout>

@@ -14,6 +14,16 @@ function computeTrendingScore(book) {
   return book.viewsLast24h * 3 + book.viewsLast7d * 2 + book.totalViews;
 }
 
+function parseTags(inputTags) {
+  if (Array.isArray(inputTags)) {
+    return inputTags.map((tag) => String(tag || '').replace(/^#/, '').trim().toLowerCase()).filter(Boolean);
+  }
+
+  return String(inputTags || '')
+    .split(',')
+    .map((tag) => tag.replace(/^#/, '').trim().toLowerCase())
+    .filter(Boolean);
+}
 
 async function resolveGroupId(groupId) {
   if (!groupId) {
@@ -36,35 +46,16 @@ function shouldRequireExistingGroup(language) {
   return normalizeLanguage(language, DEFAULT_LANGUAGE) !== DEFAULT_LANGUAGE;
 }
 
-function selectPreferredBooks(books, preferredLanguage = 'en') {
-  const groups = new Map();
-
-  for (const book of books) {
-    const key = book.groupId || book._id.toString();
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(book);
-  }
-
-  return Array.from(groups.values()).map((items) => {
-    const preferred = items.find((item) => item.language === preferredLanguage);
-    const english = items.find((item) => item.language === 'en');
-    return preferred || english || items[0];
-  });
-}
-
-async function getPaginatedBookResults({
-  query = {},
-  sort,
-  page,
-  limit,
-  preferredLanguage,
-  projection
-}) {
+async function getPaginatedBookResults({ query = {}, sort, page, limit, preferredLanguage, projection }) {
   const effectiveProjection = projection || {
     title: 1,
     slug: 1,
     author: 1,
     category: 1,
+    contentType: 1,
+    tags: 1,
+    status: 1,
+    isCompleted: 1,
     coverImage: 1,
     rating: 1,
     totalViews: 1,
@@ -72,6 +63,7 @@ async function getPaginatedBookResults({
     groupId: 1,
     updatedAt: 1
   };
+
   const groupKey = { $ifNull: ['$groupId', { $toString: '$_id' }] };
   const priorityExpression = {
     $switch: {
@@ -86,48 +78,25 @@ async function getPaginatedBookResults({
   const results = await Book.aggregate([
     { $match: query },
     { $sort: { ...sort, _id: 1 } },
-    {
-      $addFields: {
-        groupKey,
-        languagePriority: priorityExpression
-      }
-    },
+    { $addFields: { groupKey, languagePriority: priorityExpression } },
     { $sort: { ...sort, languagePriority: -1, _id: 1 } },
-    {
-      $group: {
-        _id: '$groupKey',
-        doc: { $first: '$$ROOT' }
-      }
-    },
+    { $group: { _id: '$groupKey', doc: { $first: '$$ROOT' } } },
     { $replaceRoot: { newRoot: '$doc' } },
     { $sort: { ...sort, _id: 1 } },
     {
       $facet: {
-        data: [
-          { $skip: (page - 1) * limit },
-          { $limit: limit },
-          { $project: effectiveProjection }
-        ],
+        data: [{ $skip: (page - 1) * limit }, { $limit: limit }, { $project: effectiveProjection }],
         totalCount: [{ $count: 'count' }]
       }
     }
   ]);
 
   const payload = results[0] || { data: [], totalCount: [] };
-  const total = payload.totalCount[0]?.count || 0;
-
-  return {
-    books: payload.data,
-    total
-  };
+  return { books: payload.data, total: payload.totalCount[0]?.count || 0 };
 }
 
 async function getTranslations(groupId, selectedBookId) {
-  const translations = await Book.find({ groupId })
-    .sort({ language: 1 })
-    .select('title slug language groupId coverImage')
-    .lean();
-
+  const translations = await Book.find({ groupId }).sort({ language: 1 }).select('title slug language groupId coverImage').lean();
   const sharedSlugTranslations = await applySharedSlugToBooks(translations);
 
   return sharedSlugTranslations.map((translation) => ({
@@ -136,27 +105,40 @@ async function getTranslations(groupId, selectedBookId) {
   }));
 }
 
-async function resolveBookVariant(identifier, requestedLanguage) {
-  const matcher = /^[0-9a-fA-F]{24}$/.test(identifier)
-    ? { _id: identifier }
-    : { slug: identifier };
-
-  const seedBook = await Book.findOne(matcher).lean();
+async function resolveBookVariant(identifier, requestedLanguage, options = {}) {
+  const matcher = /^[0-9a-fA-F]{24}$/.test(identifier) ? { _id: identifier } : { slug: identifier };
+  const seedBook = await Book.findOne({ ...matcher, ...(options.status ? { status: options.status } : {}) }).lean();
   if (!seedBook) return null;
 
   const language = normalizeLanguage(requestedLanguage, seedBook.language || DEFAULT_LANGUAGE);
-  const translatedBook = await Book.findOne({ groupId: seedBook.groupId || seedBook._id.toString(), language }).lean();
+  const translatedBook = await Book.findOne({
+    groupId: seedBook.groupId || seedBook._id.toString(),
+    language,
+    ...(options.status ? { status: options.status } : {})
+  }).lean();
 
   return translatedBook || seedBook;
 }
 
 exports.createBook = asyncHandler(async (req, res) => {
-  const { title, author, category, description, coverImage, featured, language, groupId } = req.body;
-  const normalizedAuthor = String(author || 'ReadNovaX Editorial').trim();
-  const normalizedLanguage = normalizeLanguage(language);
+  const {
+    title,
+    author,
+    category,
+    description,
+    coverImage,
+    featured,
+    language,
+    groupId,
+    contentType,
+    tags,
+    status
+  } = req.body;
 
-  if (!title || !category || !description || (!req.file && !coverImage)) {
-    throw new AppError('title, category, description, and cover image are required', 400);
+  const normalizedLanguage = normalizeLanguage(language);
+  const normalizedTags = parseTags(tags);
+  if (!title || !category || !description || normalizedTags.length === 0 || (!req.file && !coverImage)) {
+    throw new AppError('title, category, description, tags, and cover image are required', 400);
   }
 
   if (shouldRequireExistingGroup(normalizedLanguage) && !groupId) {
@@ -171,7 +153,6 @@ exports.createBook = asyncHandler(async (req, res) => {
 
   let resolvedCoverImage = String(coverImage || '').trim();
   let resolvedCoverImagePublicId = '';
-
   if (req.file) {
     const upload = await uploadImageBuffer({ file: req.file, folder: 'readnovax/books' });
     resolvedCoverImage = upload.secureUrl;
@@ -179,11 +160,19 @@ exports.createBook = asyncHandler(async (req, res) => {
   }
 
   const slug = await buildSharedBookSlug({ groupId: nextGroupId, title, language: normalizedLanguage });
+  const role = req.user?.role || 'admin';
+  const derivedStatus = role === 'admin' ? (status || 'published') : 'review';
+  const normalizedAuthor = String(author || req.user?.name || 'ReadNovaX Editorial').trim();
+
   const book = await Book.create({
     title: String(title).trim(),
     author: normalizedAuthor,
+    authorUserId: req.user?.id || null,
     category: String(category).trim(),
     description: String(description).trim(),
+    contentType: contentType === 'short_story' ? 'short_story' : 'long_story',
+    tags: normalizedTags,
+    status: ['review', 'published', 'rejected'].includes(derivedStatus) ? derivedStatus : 'review',
     coverImage: resolvedCoverImage,
     coverImagePublicId: resolvedCoverImagePublicId,
     featured: Boolean(featured),
@@ -191,15 +180,15 @@ exports.createBook = asyncHandler(async (req, res) => {
     language: normalizedLanguage,
     groupId: nextGroupId
   });
+
   await syncGroupBookSlugs(nextGroupId, { title: String(title).trim(), language: normalizedLanguage });
   const [sharedBook] = await applySharedSlugToBooks([book.toObject ? book.toObject() : book]);
   cache.flushAll();
-
   res.status(201).json({ success: true, book: sharedBook });
 });
 
 exports.updateBook = asyncHandler(async (req, res) => {
-  const { title, author, category, description, coverImage, featured, language, groupId } = req.body;
+  const { title, author, category, description, coverImage, featured, language, groupId, contentType, tags, status } = req.body;
   const book = await Book.findById(req.params.id);
   if (!book) throw new AppError('Book not found', 404);
 
@@ -209,19 +198,26 @@ exports.updateBook = asyncHandler(async (req, res) => {
   const nextGroupId = groupId ? await resolveGroupId(groupId) : previousGroupId;
   const nextSlug = await buildSharedBookSlug({ groupId: nextGroupId, title: nextTitle, language: nextLanguage });
   const duplicateLanguage = await Book.findOne({ groupId: nextGroupId, language: nextLanguage, _id: { $ne: book._id } }).lean();
-  if (duplicateLanguage) {
-    throw new AppError('This language already exists for the selected book group', 409);
-  }
+  if (duplicateLanguage) throw new AppError('This language already exists for the selected book group', 409);
 
   book.title = nextTitle;
   book.slug = nextSlug;
   book.author = String(author || book.author || 'ReadNovaX Editorial').trim();
   book.category = category ? String(category).trim() : book.category;
   book.description = description ? String(description).trim() : book.description;
+  book.contentType = contentType ? (contentType === 'short_story' ? 'short_story' : 'long_story') : book.contentType;
+  if (typeof tags !== 'undefined') {
+    const normalizedTags = parseTags(tags);
+    if (normalizedTags.length === 0) throw new AppError('At least one tag is required', 400);
+    book.tags = normalizedTags;
+  }
   if (coverImage) book.coverImage = String(coverImage).trim();
   book.language = nextLanguage;
   book.groupId = nextGroupId;
   if (typeof featured !== 'undefined') book.featured = Boolean(featured);
+  if (req.user?.role === 'admin' && status && ['review', 'published', 'rejected'].includes(status)) {
+    book.status = status;
+  }
 
   if (req.file) {
     const upload = await uploadImageBuffer({ file: req.file, folder: 'readnovax/books' });
@@ -233,13 +229,10 @@ exports.updateBook = asyncHandler(async (req, res) => {
   await book.save();
   await Chapter.updateMany({ bookId: book._id }, { $set: { language: book.language } });
   await syncGroupBookSlugs(nextGroupId, { title: nextTitle, language: nextLanguage });
-  if (previousGroupId !== nextGroupId) {
-    await syncGroupBookSlugs(previousGroupId);
-  }
+  if (previousGroupId !== nextGroupId) await syncGroupBookSlugs(previousGroupId);
 
   const [sharedBook] = await applySharedSlugToBooks([book.toObject ? book.toObject() : book]);
   cache.flushAll();
-
   res.json({ success: true, book: sharedBook });
 });
 
@@ -253,7 +246,6 @@ exports.deleteBook = asyncHandler(async (req, res) => {
     deleteImageByPublicId(book.coverImagePublicId)
   ]);
   cache.flushAll();
-
   res.json({ success: true, message: 'Book deleted' });
 });
 
@@ -264,33 +256,32 @@ exports.getHomepage = asyncHandler(async (req, res) => {
   if (cached) return res.json({ success: true, ...cached });
 
   const [featuredRaw, trendingRaw, popularRaw, latestChaptersRaw] = await Promise.all([
-    Book.find({ featured: true }).sort({ updatedAt: -1 }).limit(20).lean(),
-    Book.find().sort({ trendingScore: -1, totalViews: -1 }).limit(30).lean(),
-    Book.find().sort({ totalViews: -1 }).limit(30).lean(),
+    Book.find({ featured: true, status: 'published' }).sort({ updatedAt: -1 }).limit(20).lean(),
+    Book.find({ status: 'published' }).sort({ trendingScore: -1, totalViews: -1 }).limit(30).lean(),
+    Book.find({ status: 'published' }).sort({ totalViews: -1 }).limit(30).lean(),
     Chapter.find()
       .sort({ updatedAt: -1 })
       .limit(40)
-      .populate('bookId', 'title slug coverImage author language groupId')
+      .populate({ path: 'bookId', match: { status: 'published' }, select: 'title slug coverImage author language groupId' })
       .select('title slug chapterNumber updatedAt bookId language')
       .lean()
   ]);
 
-  const featured = await applySharedSlugToBooks(selectPreferredBooks(featuredRaw, lang).slice(0, 6));
-  const trending = await applySharedSlugToBooks(selectPreferredBooks(trendingRaw, lang).slice(0, 8));
-  const popular = await applySharedSlugToBooks(selectPreferredBooks(popularRaw, lang).slice(0, 8));
-  const latestChaptersByGroup = new Map();
-  for (const chapter of latestChaptersRaw) {
-    if (!chapter.bookId) continue;
-    const groupKey = chapter.bookId.groupId || String(chapter.bookId._id);
-    const current = latestChaptersByGroup.get(groupKey);
-    const nextPriority = chapter.bookId.language === lang ? 2 : chapter.bookId.language === 'en' ? 1 : 0;
-    const currentPriority = current ? (current.bookId.language === lang ? 2 : current.bookId.language === 'en' ? 1 : 0) : -1;
-
-    if (!current || nextPriority > currentPriority) {
-      latestChaptersByGroup.set(groupKey, chapter);
+  const selectPreferredBooks = (books) => {
+    const groups = new Map();
+    for (const book of books) {
+      const groupKey = book.groupId || String(book._id);
+      if (!groups.has(groupKey)) groups.set(groupKey, []);
+      groups.get(groupKey).push(book);
     }
-  }
-  const latestChapters = Array.from(latestChaptersByGroup.values()).slice(0, 10);
+    return Array.from(groups.values()).map((items) => items.find((item) => item.language === lang) || items.find((item) => item.language === 'en') || items[0]);
+  };
+
+  const featured = await applySharedSlugToBooks(selectPreferredBooks(featuredRaw).slice(0, 6));
+  const trending = await applySharedSlugToBooks(selectPreferredBooks(trendingRaw).slice(0, 8));
+  const popular = await applySharedSlugToBooks(selectPreferredBooks(popularRaw).slice(0, 8));
+  const latestChapters = latestChaptersRaw.filter((chapter) => chapter.bookId).slice(0, 10);
+
   const latestChaptersWithSharedSlugs = await Promise.all(latestChapters.map(async (chapter) => {
     const [sharedBook] = await applySharedSlugToBooks([chapter.bookId]);
     return { ...chapter, bookId: sharedBook || chapter.bookId };
@@ -304,7 +295,7 @@ exports.getHomepage = asyncHandler(async (req, res) => {
 exports.getBooks = asyncHandler(async (req, res) => {
   const { search = '', category, sort = 'updatedAt', lang = DEFAULT_LANGUAGE, includeAllLanguages } = req.query;
   const preferredLanguage = normalizeLanguage(lang, DEFAULT_LANGUAGE);
-  const query = {};
+  const query = { status: 'published' };
   const shouldIncludeAllLanguages = String(includeAllLanguages).toLowerCase() === 'true';
   const { page, limit } = getPagination(req.query, {
     defaultLimit: shouldIncludeAllLanguages ? 100 : 12,
@@ -314,7 +305,7 @@ exports.getBooks = asyncHandler(async (req, res) => {
   if (category) query.category = category;
   if (search) {
     const pattern = new RegExp(String(search).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-    query.$or = [{ title: pattern }, { author: pattern }, { category: pattern }];
+    query.$or = [{ title: pattern }, { author: pattern }, { category: pattern }, { tags: pattern }];
   }
 
   const sortMap = {
@@ -334,22 +325,15 @@ exports.getBooks = asyncHandler(async (req, res) => {
         .sort({ ...resolvedSort, title: 1, language: 1, _id: 1 })
         .skip((page - 1) * limit)
         .limit(limit)
-        .select('title slug author category coverImage rating totalViews language groupId updatedAt')
+        .select('title slug author category contentType tags status isCompleted coverImage rating totalViews language groupId updatedAt')
         .lean(),
       Book.countDocuments(query)
     ]);
   } else {
-    ({ books, total } = await getPaginatedBookResults({
-      query,
-      sort: resolvedSort,
-      page,
-      limit,
-      preferredLanguage
-    }));
+    ({ books, total } = await getPaginatedBookResults({ query, sort: resolvedSort, page, limit, preferredLanguage }));
   }
 
   const booksWithSharedSlugs = await applySharedSlugToBooks(books);
-
   res.json({ success: true, data: booksWithSharedSlugs, pagination: buildPaginationMeta({ total, page, limit }) });
 });
 
@@ -359,14 +343,11 @@ exports.getBookById = asyncHandler(async (req, res) => {
   const cached = cache.get(key);
   if (cached) return res.json({ success: true, ...cached });
 
-  const book = await resolveBookVariant(req.params.id, lang);
+  const book = await resolveBookVariant(req.params.id, lang, { status: 'published' });
   if (!book) throw new AppError('Book not found', 404);
 
   const [chapters, translations] = await Promise.all([
-    Chapter.find({ bookId: book._id })
-      .sort({ chapterNumber: 1 })
-      .select('title slug chapterNumber views updatedAt language')
-      .lean(),
+    Chapter.find({ bookId: book._id }).sort({ chapterNumber: 1 }).select('title slug chapterNumber views updatedAt language').lean(),
     getTranslations(book.groupId || String(book._id), book._id)
   ]);
 
@@ -382,14 +363,11 @@ exports.getBookBySlug = asyncHandler(async (req, res) => {
   const cached = cache.get(key);
   if (cached) return res.json(cached);
 
-  const book = await resolveBookVariant(req.params.slug, lang);
+  const book = await resolveBookVariant(req.params.slug, lang, { status: 'published' });
   if (!book) throw new AppError('Book not found', 404);
 
   const [chapters, translations] = await Promise.all([
-    Chapter.find({ bookId: book._id })
-      .sort({ chapterNumber: 1 })
-      .select('title slug chapterNumber views updatedAt language')
-      .lean(),
+    Chapter.find({ bookId: book._id }).sort({ chapterNumber: 1 }).select('title slug chapterNumber views updatedAt language').lean(),
     getTranslations(book.groupId || String(book._id), book._id)
   ]);
 
@@ -402,7 +380,7 @@ exports.getBookBySlug = asyncHandler(async (req, res) => {
 exports.getCategoryBooks = asyncHandler(async (req, res) => {
   const { page, limit } = getPagination(req.query, { defaultLimit: 12, maxLimit: 20 });
   const preferredLanguage = normalizeLanguage(req.query.lang, DEFAULT_LANGUAGE);
-  const query = { category: req.params.slug };
+  const query = { category: req.params.slug, status: 'published' };
 
   const { books, total } = await getPaginatedBookResults({
     query,
@@ -415,16 +393,19 @@ exports.getCategoryBooks = asyncHandler(async (req, res) => {
       slug: 1,
       author: 1,
       category: 1,
+      contentType: 1,
+      tags: 1,
       coverImage: 1,
       rating: 1,
       totalViews: 1,
       language: 1,
-      groupId: 1
+      groupId: 1,
+      status: 1,
+      isCompleted: 1
     }
   });
 
   const booksWithSharedSlugs = await applySharedSlugToBooks(books);
-
   res.json({ data: booksWithSharedSlugs, pagination: buildPaginationMeta({ total, page, limit }) });
 });
 

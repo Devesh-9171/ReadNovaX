@@ -1,11 +1,25 @@
 const mongoose = require('mongoose');
 
+const authorProfileSchema = new mongoose.Schema(
+  {
+    fullName: { type: String, trim: true },
+    penName: { type: String, trim: true },
+    bio: { type: String, trim: true, maxlength: 2000 },
+    paymentDetails: { type: String, trim: true, maxlength: 500 },
+    idVerification: { type: String, trim: true, maxlength: 1000 },
+    translationPermissionGrantedAt: { type: Date }
+  },
+  { _id: false }
+);
+
 const userSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     password: { type: String, required: true, minlength: 8, select: false },
-    role: { type: String, enum: ['user', 'admin'], default: 'user' },
+    role: { type: String, enum: ['user', 'author', 'admin'], default: 'user' },
+    authorStatus: { type: String, enum: ['none', 'pending', 'approved', 'rejected'], default: 'none', index: true },
+    authorProfile: { type: authorProfileSchema, default: () => ({}) },
     bookmarks: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Chapter' }],
     favoriteBooks: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Book' }],
     readingHistory: [
@@ -13,6 +27,8 @@ const userSchema = new mongoose.Schema(
         bookId: { type: mongoose.Schema.Types.ObjectId, ref: 'Book' },
         chapterId: { type: mongoose.Schema.Types.ObjectId, ref: 'Chapter' },
         progress: { type: Number, default: 0 },
+        status: { type: String, enum: ['read', 'skipped'], default: 'read' },
+        completedAt: { type: Date },
         lastReadAt: { type: Date, default: Date.now }
       }
     ]
