@@ -181,6 +181,7 @@ function EmptyAdminState() {
 export default function AdminPage() {
   const [isReady, setIsReady] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [stats, setStats] = useState(null);
   const [books, setBooks] = useState([]);
   const [blogPosts, setBlogPosts] = useState([]);
@@ -206,12 +207,19 @@ export default function AdminPage() {
   const [deletingBlogId, setDeletingBlogId] = useState('');
   const [authorRequests, setAuthorRequests] = useState([]);
   const [reviewQueue, setReviewQueue] = useState([]);
+  const [translationStats, setTranslationStats] = useState([]);
   const [editBookImageFile, setEditBookImageFile] = useState(null);
   const [editBlogImageFile, setEditBlogImageFile] = useState(null);
 
   useEffect(() => {
+    const token = getToken();
     setIsReady(true);
-    setIsAuthenticated(Boolean(getToken()));
+    setIsAuthenticated(Boolean(token));
+    if (!token) return;
+
+    api.get('/auth/profile', { headers: { Authorization: `Bearer ${token}` } })
+      .then((response) => setIsAdmin(response.data?.user?.role === 'admin'))
+      .catch(() => setIsAdmin(false));
   }, []);
 
   const chapterSlugPreview = useMemo(() => slugifyPreview(chapterForm.title || `chapter-${chapterForm.chapterNumber || 'new'}`), [chapterForm.chapterNumber, chapterForm.title]);
@@ -243,12 +251,13 @@ export default function AdminPage() {
     setListError('');
 
     try {
-      const [statsResponse, booksResponse, blogsResponse, authorRequestsResponse, reviewQueueResponse] = await Promise.all([
+      const [statsResponse, booksResponse, blogsResponse, authorRequestsResponse, reviewQueueResponse, translationsResponse] = await Promise.all([
         api.get('/admin/stats', { headers }),
         api.get('/books', { params: { limit: 100, includeAllLanguages: true } }),
         api.get('/admin/blogs', { headers }),
         api.get('/admin/author-requests', { headers }),
-        api.get('/admin/content/review-queue', { headers })
+        api.get('/admin/content/review-queue', { headers }),
+        api.get('/admin/translations', { headers })
       ]);
 
       const nextBooks = booksResponse.data.data || [];
@@ -257,6 +266,7 @@ export default function AdminPage() {
       setBlogPosts(blogsResponse.data.data || []);
       setAuthorRequests(authorRequestsResponse.data.data || []);
       setReviewQueue(reviewQueueResponse.data.data || []);
+      setTranslationStats(translationsResponse.data.data || []);
       setChapterForm((current) => ({
         ...current,
         bookId: current.bookId || nextBooks[0]?._id || ''
@@ -286,6 +296,8 @@ export default function AdminPage() {
 
     try {
       setSubmittingBook(true);
+      const normalizedTags = String(bookForm.tags || '').split(',').map((tag) => tag.trim()).filter(Boolean);
+      if (normalizedTags.length > 10) throw new Error('Books support up to 10 tags.');
       if (requiresExistingGroup && !bookForm.groupId) {
         throw new Error('Select an existing translation group before creating a translated book.');
       }
@@ -492,7 +504,7 @@ export default function AdminPage() {
     }
   };
 
-  if (!isReady || !isAuthenticated) {
+  if (!isReady || !isAuthenticated || !isAdmin) {
     return <EmptyAdminState />;
   }
 
@@ -782,9 +794,22 @@ export default function AdminPage() {
                 <p className="text-xs text-slate-500">{item.contentType} · #{(item.tags || []).join(' #')}</p>
               </div>
               <div className="flex gap-2">
-                <button type="button" onClick={async ()=>{await api.post(`/admin/content/${item._id}/review`,{status:'published'},{headers:getAuthHeaders()});loadDashboard();}} className="rounded-full bg-emerald-600 px-3 py-1 text-xs font-semibold text-white">Publish</button>
-                <button type="button" onClick={async ()=>{await api.post(`/admin/content/${item._id}/review`,{status:'rejected'},{headers:getAuthHeaders()});loadDashboard();}} className="rounded-full bg-red-600 px-3 py-1 text-xs font-semibold text-white">Reject</button>
+                <button type="button" onClick={async ()=>{await api.post(`/admin/content/${item._id}/review`,{status:'published',reviewType:item.reviewType || 'book'},{headers:getAuthHeaders()});loadDashboard();}} className="rounded-full bg-emerald-600 px-3 py-1 text-xs font-semibold text-white">Publish</button>
+                <button type="button" onClick={async ()=>{await api.post(`/admin/content/${item._id}/review`,{status:'rejected',reviewType:item.reviewType || 'book'},{headers:getAuthHeaders()});loadDashboard();}} className="rounded-full bg-red-600 px-3 py-1 text-xs font-semibold text-white">Reject</button>
               </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className={`${CARD_CLASS} mt-6`}>
+        <h2 className="text-xl font-semibold">Translation Dashboard</h2>
+        <div className="mt-3 space-y-2">
+          {translationStats.length === 0 ? <p className="text-sm text-slate-500">No translation groups found.</p> : translationStats.map((item) => (
+            <div key={item.groupId} className="rounded-xl border border-slate-200 p-3 dark:border-slate-800">
+              <p className="font-semibold">{item.title}</p>
+              <p className="text-xs text-slate-500">Total chapters: {item.totalChapters} · Translated: {item.translatedChapters} · Pending: {item.pendingChapters}</p>
+              <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">{item.status}</p>
             </div>
           ))}
         </div>

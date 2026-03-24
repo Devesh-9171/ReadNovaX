@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 const Book = require('../models/Book');
 const Chapter = require('../models/Chapter');
 const BlogPost = require('../models/BlogPost');
+const ShortStory = require('../models/ShortStory');
 const User = require('../models/User');
 const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
@@ -229,8 +230,9 @@ exports.deleteBlog = asyncHandler(async (req, res) => {
 });
 
 exports.dashboardStats = asyncHandler(async (_req, res) => {
-  const [totalBooks, totalChapters, totalBlogs, totalViews, topBooks, authorRequests, reviewQueue] = await Promise.all([
+  const [totalBooks, totalShortStories, totalChapters, totalBlogs, totalViews, topBooks, authorRequests, reviewQueue] = await Promise.all([
     Book.countDocuments(),
+    ShortStory.countDocuments(),
     Chapter.countDocuments(),
     BlogPost.countDocuments(),
     Book.aggregate([{ $group: { _id: null, views: { $sum: '$totalViews' } } }]),
@@ -240,7 +242,9 @@ exports.dashboardStats = asyncHandler(async (_req, res) => {
   ]);
 
   res.json({
-    totalBooks,
+    totalBooks: totalBooks + totalShortStories,
+    totalLongStories: totalBooks,
+    totalShortStories,
     totalChapters,
     totalBlogs,
     totalViews: totalViews[0]?.views || 0,
@@ -279,21 +283,31 @@ exports.reviewAuthorRequest = asyncHandler(async (req, res) => {
 });
 
 exports.getReviewQueue = asyncHandler(async (_req, res) => {
-  const items = await Book.find({ status: 'review' })
+  const bookItems = await Book.find({ status: 'review' })
     .sort({ updatedAt: 1 })
     .select('title author slug contentType tags status language updatedAt')
     .lean();
+  const shortStoryItems = await ShortStory.find({ status: 'review' })
+    .sort({ updatedAt: 1 })
+    .select('title tags status updatedAt')
+    .lean();
+
+  const items = [
+    ...bookItems.map((item) => ({ ...item, reviewType: 'book' })),
+    ...shortStoryItems.map((item) => ({ ...item, reviewType: 'short_story', contentType: 'short_story', author: 'Author upload', language: 'en' }))
+  ].sort((left, right) => new Date(left.updatedAt).getTime() - new Date(right.updatedAt).getTime());
 
   res.json({ success: true, data: items });
 });
 
 exports.reviewContent = asyncHandler(async (req, res) => {
-  const { status, rejectionReason } = req.body;
+  const { status, rejectionReason, reviewType = 'book' } = req.body;
   if (!['published', 'rejected', 'review'].includes(status)) {
     throw new AppError('status must be review, published, or rejected', 400);
   }
 
-  const book = await Book.findByIdAndUpdate(
+  const model = reviewType === 'short_story' ? ShortStory : Book;
+  const content = await model.findByIdAndUpdate(
     req.params.bookId,
     {
       status,
@@ -303,9 +317,9 @@ exports.reviewContent = asyncHandler(async (req, res) => {
     { new: true }
   );
 
-  if (!book) throw new AppError('Content not found', 404);
+  if (!content) throw new AppError('Content not found', 404);
   cache.flushAll();
-  res.json({ success: true, data: book });
+  res.json({ success: true, data: content });
 });
 
 exports.markBookFinished = asyncHandler(async (req, res) => {
