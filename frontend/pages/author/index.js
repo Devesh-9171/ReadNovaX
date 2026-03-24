@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import Layout from '../../components/Layout';
@@ -23,38 +23,54 @@ export default function AuthorDashboardPage() {
   const [storyForm, setStoryForm] = useState({ title: '', description: '', content: '', tags: '', coverImageFile: null });
   const [submitting, setSubmitting] = useState(false);
 
-  const { user, token, loading: authLoading, refreshUser } = useAuth();
+  const { user, token, loading: authLoading } = useAuth();
   const router = useRouter();
+  const loadedForTokenRef = useRef('');
 
   const headers = useMemo(() => (token ? { Authorization: `Bearer ${token}` } : null), [token]);
 
   const loadData = useCallback(async () => {
     if (!headers) return;
-
-    setLoading(true);
-    try {
-      await refreshUser();
-      const booksResponse = await api.get('/user/my-content', { headers });
-      setBooks(booksResponse.data?.data || []);
-      setChapterForm((current) => ({ ...current, bookId: current.bookId || booksResponse.data?.data?.[0]?._id || '' }));
-    } catch (requestError) {
-      setError(requestError.message || 'Could not load author workspace.');
-    } finally {
-      setLoading(false);
-    }
-  }, [headers, refreshUser]);
+    const booksResponse = await api.get('/user/my-content', { headers });
+    setBooks(booksResponse.data?.data || []);
+    setChapterForm((current) => ({ ...current, bookId: current.bookId || booksResponse.data?.data?.[0]?._id || '' }));
+  }, [headers]);
 
   useEffect(() => {
     if (authLoading) return;
     if (!token) {
+      loadedForTokenRef.current = '';
       setLoading(false);
       return;
     }
     if (user?.role !== 'author') {
+      loadedForTokenRef.current = '';
       setLoading(false);
       return;
     }
-    loadData();
+    if (loadedForTokenRef.current === token) {
+      setLoading(false);
+      return;
+    }
+
+    let isCancelled = false;
+    setLoading(true);
+    setError('');
+
+    (async () => {
+      try {
+        await loadData();
+        if (!isCancelled) loadedForTokenRef.current = token;
+      } catch (requestError) {
+        if (!isCancelled) setError(requestError.message || 'Could not load author workspace.');
+      } finally {
+        if (!isCancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      isCancelled = true;
+    };
   }, [authLoading, loadData, token, user?.role]);
 
 
@@ -88,6 +104,7 @@ export default function AuthorDashboardPage() {
       await api.post('/books', payload, { headers });
       setSuccess('Book submitted for review.');
       setBookForm({ title: '', description: '', category: 'action', language: 'english', tags: '', coverImageFile: null });
+      loadedForTokenRef.current = '';
       await loadData();
     } catch (requestError) {
       setError(requestError.message || 'Could not save book.');
@@ -107,6 +124,7 @@ export default function AuthorDashboardPage() {
       await api.post('/chapters', chapterForm, { headers });
       setSuccess('Chapter submitted for review.');
       setChapterForm((current) => ({ ...current, chapterNumber: '', title: '', content: '' }));
+      loadedForTokenRef.current = '';
     } catch (requestError) {
       setError(requestError.message || 'Could not save chapter.');
     } finally {
@@ -142,6 +160,7 @@ export default function AuthorDashboardPage() {
       await api.post('/short-stories', payload, { headers });
       setSuccess('Short story uploaded and queued for admin review.');
       setStoryForm({ title: '', description: '', content: '', tags: '', coverImageFile: null });
+      loadedForTokenRef.current = '';
     } catch (requestError) {
       setError(requestError.message || 'Could not upload short story.');
     } finally {
