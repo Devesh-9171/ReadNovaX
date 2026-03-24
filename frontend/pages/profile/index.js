@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
+import Link from 'next/link';
 import Layout from '../../components/Layout';
 import api from '../../utils/api';
 
@@ -132,9 +133,9 @@ export default function ProfilePage() {
             <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
               <h2 className="text-xl font-semibold">Author Dashboard</h2>
               <div className="mt-4 grid gap-2 sm:grid-cols-3">
-                <a href="/admin" className="rounded-xl border border-slate-300 px-4 py-3 text-center text-sm dark:border-slate-700">Create New Book</a>
-                <a href="/admin" className="rounded-xl border border-slate-300 px-4 py-3 text-center text-sm dark:border-slate-700">Add Chapter</a>
-                <a href="/admin" className="rounded-xl border border-slate-300 px-4 py-3 text-center text-sm dark:border-slate-700">Upload Short Story</a>
+                <Link href="/admin" className="rounded-xl border border-slate-300 px-4 py-3 text-center text-sm dark:border-slate-700">Create New Book</Link>
+                <Link href="/admin" className="rounded-xl border border-slate-300 px-4 py-3 text-center text-sm dark:border-slate-700">Add Chapter</Link>
+                <Link href="/admin" className="rounded-xl border border-slate-300 px-4 py-3 text-center text-sm dark:border-slate-700">Upload Short Story</Link>
               </div>
             </div>
           )}
