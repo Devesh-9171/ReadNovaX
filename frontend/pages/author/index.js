@@ -1,0 +1,197 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import Layout from '../../components/Layout';
+import api from '../../utils/api';
+
+const INPUT_CLASS = 'w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus:border-sky-400 dark:focus:ring-sky-400/10';
+const CARD_CLASS = 'rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950';
+
+function getToken() {
+  if (typeof window === 'undefined') return '';
+  return localStorage.getItem('token') || '';
+}
+
+function parseTags(text) {
+  return String(text || '').split(',').map((tag) => tag.replace(/^#/, '').trim()).filter(Boolean);
+}
+
+export default function AuthorDashboardPage() {
+  const [role, setRole] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [books, setBooks] = useState([]);
+
+  const [bookForm, setBookForm] = useState({ title: '', description: '', category: 'action', tags: '', coverImageFile: null });
+  const [chapterForm, setChapterForm] = useState({ bookId: '', chapterNumber: '', title: '', content: '' });
+  const [storyForm, setStoryForm] = useState({ title: '', description: '', content: '', tags: '', coverImageFile: null });
+  const [submitting, setSubmitting] = useState(false);
+
+  const headers = useMemo(() => {
+    const token = getToken();
+    return token ? { Authorization: `Bearer ${token}` } : null;
+  }, []);
+
+  const loadData = useCallback(async () => {
+    if (!headers) {
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const [meResponse, booksResponse] = await Promise.all([
+        api.get('/user/me', { headers }),
+        api.get('/user/my-content', { headers })
+      ]);
+      setRole(meResponse.data?.role || '');
+      setBooks(booksResponse.data?.data || []);
+      setChapterForm((current) => ({ ...current, bookId: current.bookId || booksResponse.data?.data?.[0]?._id || '' }));
+    } catch (requestError) {
+      setError(requestError.message || 'Could not load author workspace.');
+    } finally {
+      setLoading(false);
+    }
+  }, [headers]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const submitBook = async (event) => {
+    event.preventDefault();
+    if (!headers) return;
+
+    const tags = parseTags(bookForm.tags);
+    if (tags.length > 10) {
+      setError('Books support up to 10 tags.');
+      return;
+    }
+
+    setError('');
+    setSuccess('');
+    try {
+      setSubmitting(true);
+      const payload = new FormData();
+      payload.append('title', bookForm.title.trim());
+      payload.append('description', bookForm.description.trim());
+      payload.append('category', bookForm.category.trim());
+      payload.append('tags', tags.join(','));
+      payload.append('coverImage', bookForm.coverImageFile);
+      await api.post('/books', payload, { headers });
+      setSuccess('Book submitted for review.');
+      setBookForm({ title: '', description: '', category: 'action', tags: '', coverImageFile: null });
+      await loadData();
+    } catch (requestError) {
+      setError(requestError.message || 'Could not save book.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const submitChapter = async (event) => {
+    event.preventDefault();
+    if (!headers) return;
+    setError('');
+    setSuccess('');
+
+    try {
+      setSubmitting(true);
+      await api.post('/chapters', chapterForm, { headers });
+      setSuccess('Chapter submitted for review.');
+      setChapterForm((current) => ({ ...current, chapterNumber: '', title: '', content: '' }));
+    } catch (requestError) {
+      setError(requestError.message || 'Could not save chapter.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const submitShortStory = async (event) => {
+    event.preventDefault();
+    if (!headers) return;
+
+    const tags = parseTags(storyForm.tags);
+    if (tags.length > 3) {
+      setError('Short stories support up to 3 tags.');
+      return;
+    }
+
+    if (String(storyForm.description || '').trim().split(/\s+/).filter(Boolean).length > 50) {
+      setError('Short story description must be 50 words or fewer.');
+      return;
+    }
+
+    setError('');
+    setSuccess('');
+    try {
+      setSubmitting(true);
+      const payload = new FormData();
+      payload.append('title', storyForm.title.trim());
+      payload.append('description', storyForm.description.trim());
+      payload.append('content', storyForm.content.trim());
+      payload.append('tags', tags.join(','));
+      payload.append('coverImage', storyForm.coverImageFile);
+      await api.post('/short-stories', payload, { headers });
+      setSuccess('Short story uploaded and queued for admin review.');
+      setStoryForm({ title: '', description: '', content: '', tags: '', coverImageFile: null });
+    } catch (requestError) {
+      setError(requestError.message || 'Could not upload short story.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (loading) return <Layout><p>Loading author dashboard...</p></Layout>;
+  if (role !== 'author' && role !== 'admin') {
+    return <Layout><div className={CARD_CLASS}><p className="font-semibold">Author access required.</p><Link href="/profile" className="mt-3 inline-block text-brand-600">Back to profile</Link></div></Layout>;
+  }
+
+  return (
+    <Layout>
+      <h1 className="mb-6 text-3xl font-bold">Author Dashboard</h1>
+      {error ? <p className="mb-4 rounded-xl border border-red-300 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p> : null}
+      {success ? <p className="mb-4 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm text-emerald-700">{success}</p> : null}
+
+      <div className="grid gap-5 lg:grid-cols-2">
+        <form onSubmit={submitBook} className={CARD_CLASS}>
+          <h2 className="text-xl font-semibold">Create Book</h2>
+          <div className="mt-3 space-y-3">
+            <input className={INPUT_CLASS} placeholder="Title" required value={bookForm.title} onChange={(e) => setBookForm((c) => ({ ...c, title: e.target.value }))} />
+            <textarea className={`${INPUT_CLASS} min-h-[110px]`} placeholder="Description" required value={bookForm.description} onChange={(e) => setBookForm((c) => ({ ...c, description: e.target.value }))} />
+            <input className={INPUT_CLASS} placeholder="Tags (comma separated, max 10)" value={bookForm.tags} onChange={(e) => setBookForm((c) => ({ ...c, tags: e.target.value }))} />
+            <input className={INPUT_CLASS} type="file" accept="image/*" required onChange={(e) => setBookForm((c) => ({ ...c, coverImageFile: e.target.files?.[0] || null }))} />
+            <button disabled={submitting} className="w-full rounded-xl bg-brand-600 px-4 py-2 text-white disabled:opacity-60">{submitting ? 'Saving...' : 'Save Book'}</button>
+          </div>
+        </form>
+
+        <form onSubmit={submitChapter} className={CARD_CLASS}>
+          <h2 className="text-xl font-semibold">Add Chapter</h2>
+          <div className="mt-3 space-y-3">
+            <select className={INPUT_CLASS} required value={chapterForm.bookId} onChange={(e) => setChapterForm((c) => ({ ...c, bookId: e.target.value }))}>
+              <option value="">Select your book</option>
+              {books.map((book) => <option key={book._id} value={book._id}>{book.title}</option>)}
+            </select>
+            <input className={INPUT_CLASS} type="number" min="1" required placeholder="Chapter number" value={chapterForm.chapterNumber} onChange={(e) => setChapterForm((c) => ({ ...c, chapterNumber: e.target.value }))} />
+            <input className={INPUT_CLASS} required placeholder="Chapter title" value={chapterForm.title} onChange={(e) => setChapterForm((c) => ({ ...c, title: e.target.value }))} />
+            <textarea className={`${INPUT_CLASS} min-h-[150px]`} required placeholder="Chapter content" value={chapterForm.content} onChange={(e) => setChapterForm((c) => ({ ...c, content: e.target.value }))} />
+            <button disabled={submitting} className="w-full rounded-xl bg-brand-600 px-4 py-2 text-white disabled:opacity-60">{submitting ? 'Saving...' : 'Save Chapter'}</button>
+          </div>
+        </form>
+
+        <form onSubmit={submitShortStory} className={`${CARD_CLASS} lg:col-span-2`}>
+          <h2 className="text-xl font-semibold">Upload Short Story</h2>
+          <p className="mt-1 text-sm text-slate-500">Single-page format only. Max 3 tags. Description max 50 words.</p>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <input className={INPUT_CLASS} required placeholder="Title" value={storyForm.title} onChange={(e) => setStoryForm((c) => ({ ...c, title: e.target.value }))} />
+            <input className={INPUT_CLASS} placeholder="Tags (comma separated, max 3)" value={storyForm.tags} onChange={(e) => setStoryForm((c) => ({ ...c, tags: e.target.value }))} />
+          </div>
+          <textarea className={`${INPUT_CLASS} mt-3 min-h-[90px]`} required placeholder="Description" value={storyForm.description} onChange={(e) => setStoryForm((c) => ({ ...c, description: e.target.value }))} />
+          <textarea className={`${INPUT_CLASS} mt-3 min-h-[200px]`} required placeholder="Story content (single page)" value={storyForm.content} onChange={(e) => setStoryForm((c) => ({ ...c, content: e.target.value }))} />
+          <input className={`${INPUT_CLASS} mt-3`} type="file" accept="image/*" required onChange={(e) => setStoryForm((c) => ({ ...c, coverImageFile: e.target.files?.[0] || null }))} />
+          <button disabled={submitting} className="mt-3 w-full rounded-xl bg-brand-600 px-4 py-2 text-white disabled:opacity-60">{submitting ? 'Uploading...' : 'Upload Short Story'}</button>
+        </form>
+      </div>
+    </Layout>
+  );
+}

@@ -2,6 +2,7 @@ const ShortStory = require('../models/ShortStory');
 const User = require('../models/User');
 const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
+const { uploadImageBuffer } = require('../utils/cloudinaryAssets');
 
 function countWords(content = '') {
   return String(content).trim().split(/\s+/).filter(Boolean).length;
@@ -14,7 +15,7 @@ function parseTags(tags) {
 
 exports.createShortStory = asyncHandler(async (req, res) => {
   const { title, coverImage, description, content, tags } = req.body;
-  if (!title || !coverImage || !description || !content) {
+  if (!title || (!coverImage && !req.file) || !description || !content) {
     throw new AppError('title, coverImage, description, and content are required', 400);
   }
   if (countWords(description) > 50) throw new AppError('Description must be 50 words or fewer', 400);
@@ -27,10 +28,19 @@ exports.createShortStory = asyncHandler(async (req, res) => {
     throw new AppError('Only approved authors can upload short stories', 403);
   }
 
+  let resolvedCoverImage = String(coverImage || '').trim();
+  let coverImagePublicId = '';
+  if (req.file) {
+    const upload = await uploadImageBuffer({ file: req.file, folder: 'readnovax/short-stories' });
+    resolvedCoverImage = upload.secureUrl;
+    coverImagePublicId = upload.publicId;
+  }
+
   const words = countWords(content);
   const story = await ShortStory.create({
     title: String(title).trim(),
-    coverImage: String(coverImage).trim(),
+    coverImage: resolvedCoverImage,
+    coverImagePublicId,
     description: String(description).trim(),
     content: String(content).trim(),
     tags: normalizedTags,

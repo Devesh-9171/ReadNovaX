@@ -5,7 +5,7 @@ function auth(requiredRole = null) {
   return (req, res, next) => {
     authMiddleware(req, res, (error) => {
       if (error) return next(error);
-      if (requiredRole && req.user?.role !== requiredRole) {
+      if (requiredRole && req.user?.role !== 'admin' && req.user?.role !== requiredRole) {
         return next(new AppError('Forbidden', 403));
       }
       return next();

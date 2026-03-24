@@ -61,4 +61,14 @@ userSchema.set('toJSON', {
 
 userSchema.index({ role: 1, createdAt: -1 });
 
+userSchema.pre('validate', function normalizeRoleAndAuthorState(next) {
+  if (this.role === 'author' || this.role === 'admin') {
+    this.authorStatus = 'approved';
+  } else if (this.role === 'user' && this.authorStatus === 'approved') {
+    this.authorStatus = 'none';
+  }
+
+  next();
+});
+
 module.exports = mongoose.model('User', userSchema);

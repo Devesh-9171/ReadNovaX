@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
 import Layout from '../../components/Layout';
@@ -22,11 +22,14 @@ export default function ProfilePage() {
   const [authorForm, setAuthorForm] = useState(initialAuthorForm);
   const [submittingAuthor, setSubmittingAuthor] = useState(false);
   const [enablingTranslation, setEnablingTranslation] = useState(false);
+  const [otp, setOtp] = useState('');
+  const [verifyingOtp, setVerifyingOtp] = useState(false);
+  const [resendingOtp, setResendingOtp] = useState(false);
   const router = useRouter();
 
   const token = typeof window !== 'undefined' ? localStorage.getItem('token') : '';
 
-  const loadProfile = async () => {
+  const loadProfile = useCallback(async () => {
     if (!token) return;
     try {
       const res = await api.get('/user/me', { headers: { Authorization: `Bearer ${token}` } });
@@ -42,11 +45,11 @@ export default function ProfilePage() {
     } catch (err) {
       setError(err.message || 'Failed to load profile');
     }
-  };
+  }, [token]);
 
   useEffect(() => {
     loadProfile();
-  }, []);
+  }, [loadProfile]);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -92,6 +95,7 @@ export default function ProfilePage() {
   const authorStatus = me?.authorStatus || 'none';
   const translationPermissionGranted = Boolean(me?.authorProfile?.translationPermissionGrantedAt);
   const isEmailVerified = Boolean(me?.isEmailVerified);
+  const showEmailWarning = me?.role === 'user' && !isEmailVerified;
 
   return (
     <Layout>
@@ -114,7 +118,55 @@ export default function ProfilePage() {
           <div className="space-y-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
             <p><strong>{me.username}</strong> ({me.email})</p>
             <p className="text-sm">Role: <strong className="uppercase">{me.role}</strong> · Author request: <strong className="uppercase">{authorStatus}</strong></p>
-            {!isEmailVerified ? <p className="rounded-xl border border-amber-400/40 bg-amber-100/60 p-2 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">Email not verified. Please verify your email before applying as author.</p> : null}
+            {showEmailWarning ? <p className="rounded-xl border border-amber-400/40 bg-amber-100/60 p-2 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">Email not verified. Please verify your email before applying as author.</p> : null}
+            {showEmailWarning ? (
+              <div className="grid gap-2 sm:grid-cols-[1fr_auto_auto]">
+                <input className={INPUT_CLASS} placeholder="Enter 6-digit OTP" value={otp} maxLength={6} onChange={(event) => setOtp(event.target.value.replace(/\D/g, ''))} />
+                <button
+                  type="button"
+                  disabled={verifyingOtp || otp.length !== 6}
+                  className="rounded-full bg-brand-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                  onClick={async () => {
+                    setError('');
+                    setSuccess('');
+                    try {
+                      setVerifyingOtp(true);
+                      const response = await api.post('/auth/verify-email', { email: me.email, otp });
+                      if (response.data?.token) localStorage.setItem('token', response.data.token);
+                      setSuccess('Email verified successfully.');
+                      setOtp('');
+                      await loadProfile();
+                    } catch (requestError) {
+                      setError(requestError.message || 'OTP verification failed.');
+                    } finally {
+                      setVerifyingOtp(false);
+                    }
+                  }}
+                >
+                  {verifyingOtp ? 'Verifying...' : 'Verify'}
+                </button>
+                <button
+                  type="button"
+                  disabled={resendingOtp}
+                  className="rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold disabled:opacity-60 dark:border-slate-700"
+                  onClick={async () => {
+                    setError('');
+                    setSuccess('');
+                    try {
+                      setResendingOtp(true);
+                      await api.post('/auth/resend-otp', { email: me.email });
+                      setSuccess('A new OTP has been sent to your email.');
+                    } catch (requestError) {
+                      setError(requestError.message || 'Could not resend OTP.');
+                    } finally {
+                      setResendingOtp(false);
+                    }
+                  }}
+                >
+                  {resendingOtp ? 'Sending...' : 'Resend OTP'}
+                </button>
+              </div>
+            ) : null}
             <section>
               <h2 className="font-semibold">Favorite Books</h2>
               <ul className="list-disc pl-5">{(me.favoriteBooks || []).map((book) => <li key={book._id}>{book.title}</li>)}</ul>
@@ -129,13 +181,13 @@ export default function ProfilePage() {
             </section>
           </div>
 
-          {me.role === 'author' && authorStatus === 'approved' && (
+          {(me.role === 'author' || me.role === 'admin') && (
             <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
               <h2 className="text-xl font-semibold">Author Dashboard</h2>
-              <div className="mt-4 grid gap-2 sm:grid-cols-3">
-                <Link href="/admin" className="rounded-xl border border-slate-300 px-4 py-3 text-center text-sm dark:border-slate-700">Create New Book</Link>
-                <Link href="/admin" className="rounded-xl border border-slate-300 px-4 py-3 text-center text-sm dark:border-slate-700">Add Chapter</Link>
-                <Link href="/admin" className="rounded-xl border border-slate-300 px-4 py-3 text-center text-sm dark:border-slate-700">Upload Short Story</Link>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Manage your books, chapters, and short stories.</p>
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                <Link href="/author" className="rounded-xl border border-slate-300 px-4 py-3 text-center text-sm dark:border-slate-700">Open Author Workspace</Link>
+                {me.role === 'admin' ? <Link href="/admin" className="rounded-xl border border-slate-300 px-4 py-3 text-center text-sm dark:border-slate-700">Open Admin Dashboard</Link> : null}
               </div>
             </div>
           )}
@@ -155,7 +207,7 @@ export default function ProfilePage() {
                 <input type="checkbox" checked={authorForm.agreeToTerms} onChange={(e) => setAuthorForm((c) => ({ ...c, agreeToTerms: e.target.checked }))} />
                 I agree to Terms & Conditions
               </label>
-              <button disabled={submittingAuthor || authorStatus === 'pending' || !authorForm.agreeToTerms || !isEmailVerified} className="mt-4 rounded-full bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60">
+              <button disabled={submittingAuthor || authorStatus === 'pending' || !authorForm.agreeToTerms || !isEmailVerified} className="mt-4 rounded-full bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60">
                 {submittingAuthor ? 'Submitting...' : authorStatus === 'pending' ? 'Request Pending' : 'Submit Author Request'}
               </button>
             </form>

@@ -29,7 +29,7 @@ function requireAdmin(req, _res, next) {
 
 function requireRoles(roles = []) {
   return (req, _res, next) => {
-    if (!roles.includes(req.user?.role)) {
+    if (req.user?.role !== 'admin' && !roles.includes(req.user?.role)) {
       return next(new AppError('Forbidden', 403));
     }
     return next();
