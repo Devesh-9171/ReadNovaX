@@ -20,8 +20,16 @@ function parseTags(inputTags) {
     .filter(Boolean);
 }
 
+function parseBoolean(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value === 1;
+  if (typeof value === 'string') return ['true', '1', 'yes', 'on'].includes(value.trim().toLowerCase());
+  return false;
+}
+
 exports.createChapter = asyncHandler(async (req, res) => {
   const { bookId, chapterNumber, title, content } = req.body;
+  const isFinalChapter = parseBoolean(req.body.isFinalChapter);
 
   if (!bookId || !chapterNumber || !title || !content) {
     throw new AppError('bookId, chapterNumber, title, and content are required', 400);
@@ -51,6 +59,10 @@ exports.createChapter = asyncHandler(async (req, res) => {
     imagePublicId = upload.publicId;
   }
 
+  if (isFinalChapter) {
+    await Chapter.updateMany({ bookId: book._id, isFinalChapter: true }, { $set: { isFinalChapter: false } });
+  }
+
   const chapter = await Chapter.create({
     bookId: book._id,
     language: book.language || DEFAULT_LANGUAGE,
@@ -60,6 +72,7 @@ exports.createChapter = asyncHandler(async (req, res) => {
     title: String(title).trim(),
     content: String(content).trim(),
     slug,
+    isFinalChapter,
     image,
     imagePublicId
   });
@@ -117,7 +130,7 @@ exports.getChapter = asyncHandler(async (req, res) => {
   const [previousChapter, nextChapter, chapters] = await Promise.all([
     Chapter.findOne({ bookId: book._id, chapterNumber: chapter.chapterNumber - 1 }).select('title slug chapterNumber').lean(),
     Chapter.findOne({ bookId: book._id, chapterNumber: chapter.chapterNumber + 1 }).select('title slug chapterNumber').lean(),
-    Chapter.find({ bookId: book._id }).sort({ chapterNumber: 1 }).select('title slug chapterNumber').lean()
+    Chapter.find({ bookId: book._id }).sort({ chapterNumber: 1 }).select('title slug chapterNumber isFinalChapter').lean()
   ]);
 
   const [sharedBook] = await applySharedSlugToBooks([book]);
@@ -136,21 +149,44 @@ exports.getChapter = asyncHandler(async (req, res) => {
     })
     .filter(Boolean);
 
-  let similarBooks = [];
-  if ((sharedBook?.tags || []).length > 0) {
-    similarBooks = await Book.find({
-      _id: { $ne: book._id },
-      groupId: { $ne: book.groupId },
-      status: 'published',
-      tags: { $in: sharedBook.tags }
-    })
-      .sort({ totalViews: -1, updatedAt: -1 })
-      .limit(5)
-      .select('title slug coverImage tags language')
-      .lean();
+  const recommendationLimit = 6;
+  const recommendationIds = new Set([String(book._id)]);
+  const baseRecommendationFilter = {
+    _id: { $ne: book._id },
+    status: 'published',
+    contentType: { $ne: 'short_story' },
+    ...(book.groupId ? { groupId: { $ne: book.groupId } } : {})
+  };
+  const similarOrConditions = [];
+  if ((sharedBook?.tags || []).length > 0) similarOrConditions.push({ tags: { $in: sharedBook.tags } });
+  if (sharedBook?.category) similarOrConditions.push({ category: sharedBook.category });
 
-    similarBooks = await applySharedSlugToBooks(similarBooks);
+  let similarBooks = [];
+  if (similarOrConditions.length > 0) {
+    similarBooks = await Book.find({ ...baseRecommendationFilter, $or: similarOrConditions })
+      .sort({ totalViews: -1, trendingScore: -1, updatedAt: -1 })
+      .limit(recommendationLimit)
+      .select('title slug coverImage tags language category totalViews trendingScore')
+      .lean();
+    similarBooks.forEach((item) => recommendationIds.add(String(item._id)));
   }
+
+  let fallbackBooks = [];
+  if (similarBooks.length < recommendationLimit) {
+    fallbackBooks = await Book.find({
+      _id: { $nin: Array.from(recommendationIds) },
+      status: 'published',
+      contentType: { $ne: 'short_story' },
+      ...(book.groupId ? { groupId: { $ne: book.groupId } } : {})
+    })
+      .sort({ trendingScore: -1, totalViews: -1, updatedAt: -1 })
+      .limit(recommendationLimit - similarBooks.length)
+      .select('title slug coverImage tags language category totalViews trendingScore')
+      .lean();
+  }
+
+  const recommendedBooks = await applySharedSlugToBooks([...similarBooks, ...fallbackBooks]);
+  const isRecommendationFallback = similarBooks.length < recommendationLimit;
 
   const payload = {
     book: sharedBook || book,
@@ -161,7 +197,8 @@ exports.getChapter = asyncHandler(async (req, res) => {
     translations: sharedTranslations,
     chapterTranslations,
     chapterNumber: chapter.chapterNumber,
-    similarBooks
+    similarBooks: recommendedBooks,
+    isRecommendationFallback
   };
   cache.set(key, payload, 30);
   res.json(payload);

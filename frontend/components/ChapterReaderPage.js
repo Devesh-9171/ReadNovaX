@@ -22,7 +22,7 @@ function getChapterHref(book, chapterSlug, language = book.language) {
   return `/book/${book.slug}/${chapterSlug}${language === 'hi' ? '?lang=hi' : ''}`;
 }
 
-export default function ChapterReaderPage({ book, chapter, chapters = [], previousChapter, nextChapter, translations = [], chapterTranslations = [], similarBooks = [], isFallback }) {
+export default function ChapterReaderPage({ book, chapter, chapters = [], previousChapter, nextChapter, translations = [], chapterTranslations = [], similarBooks = [], isRecommendationFallback = false, isFallback }) {
   const router = useRouter();
   const sentinelRef = useRef(null);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
@@ -258,6 +258,8 @@ export default function ChapterReaderPage({ book, chapter, chapters = [], previo
   };
 
   const showLanguageSwitch = translations.length > 1;
+  const isFinalChapter = Boolean(chapter?.isFinalChapter);
+  const shouldShowNextChapter = !isFinalChapter && Boolean(nextChapter);
 
   return (
     <Layout>
@@ -364,23 +366,29 @@ export default function ChapterReaderPage({ book, chapter, chapters = [], previo
               <div className="rounded-2xl border border-dashed border-slate-300 px-4 py-4 text-sm text-slate-400 dark:border-slate-700">You are at the beginning.</div>
             )}
 
-            {nextChapter ? (
+            {shouldShowNextChapter ? (
               <Link href={getChapterHref(book, nextChapter.slug)} className="rounded-2xl bg-brand-600 px-4 py-4 text-sm font-medium text-white transition hover:bg-brand-500 dark:bg-sky-500 dark:text-slate-950 dark:hover:bg-sky-400">
                 <span className="block text-xs uppercase tracking-[0.2em] text-white/80 dark:text-slate-900/80">Next chapter</span>
                 <span className="mt-1 block">{nextChapter.title}</span>
               </Link>
             ) : (
-              <div className="rounded-2xl border border-dashed border-slate-300 px-4 py-4 text-sm text-slate-400 dark:border-slate-700">{book.isCompleted ? 'This story is finished.' : 'You reached the latest chapter.'}</div>
+              <div className="rounded-2xl border border-dashed border-slate-300 px-4 py-4 text-sm text-slate-400 dark:border-slate-700">{isFinalChapter || book.isCompleted ? 'This story is finished.' : 'You reached the latest chapter.'}</div>
             )}
           </div>
 
-          {!nextChapter && book.isCompleted && (similarBooks || []).length > 0 ? (
+          {isFinalChapter && (similarBooks || []).length > 0 ? (
             <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">Similar books</p>
-              <div className="mt-3 flex flex-wrap gap-2">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">Recommended books</p>
+                <span className="text-xs text-slate-500 dark:text-slate-400">{isRecommendationFallback ? 'Including trending picks' : 'Based on this book genre/tags'}</span>
+              </div>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2 md:grid-cols-3">
                 {similarBooks.map((item) => (
-                  <Link key={item._id} href={`/book/${item.slug}${item.language === 'hi' ? '?lang=hi' : ''}`} className="rounded-full border border-slate-300 px-3 py-1.5 text-sm hover:border-brand-500 hover:text-brand-600 dark:border-slate-700 dark:hover:border-sky-400">
-                    {item.title}
+                  <Link key={item._id} href={`/book/${item.slug}${item.language === 'hi' ? '?lang=hi' : ''}`} className="overflow-hidden rounded-xl border border-slate-200 bg-white transition hover:border-brand-500 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-sky-400">
+                    <div className="aspect-[3/4] bg-slate-100 dark:bg-slate-800">
+                      {item.coverImage ? <img src={item.coverImage} alt={item.title} className="h-full w-full object-cover" loading="lazy" /> : null}
+                    </div>
+                    <div className="px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-200">{item.title}</div>
                   </Link>
                 ))}
               </div>

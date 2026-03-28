@@ -39,6 +39,7 @@ const initialChapterForm = {
   chapterNumber: '',
   title: '',
   content: '',
+  isFinalChapter: false,
   imageFile: null
 };
 
@@ -393,6 +394,7 @@ export default function AdminPage() {
       payload.append('chapterNumber', String(Number(chapterForm.chapterNumber)));
       payload.append('title', chapterForm.title.trim());
       payload.append('content', chapterForm.content.trim());
+      payload.append('isFinalChapter', String(Boolean(chapterForm.isFinalChapter)));
       if (chapterForm.imageFile) payload.append('image', chapterForm.imageFile);
 
       await api.post('/chapters', payload, { headers: authHeaders });
@@ -641,6 +643,14 @@ export default function AdminPage() {
               Generated slug: <span className="font-semibold text-slate-900 dark:text-white">{chapterSlugPreview || 'chapter-preview'}</span>
             </div>
             <textarea className={`${TEXTAREA_CLASS} min-h-[240px]`} value={chapterForm.content} onChange={(event) => setChapterForm((current) => ({ ...current, content: event.target.value }))} placeholder="Write chapter content here" required />
+            <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+              <input
+                type="checkbox"
+                checked={Boolean(chapterForm.isFinalChapter)}
+                onChange={(event) => setChapterForm((current) => ({ ...current, isFinalChapter: event.target.checked }))}
+              />
+              Mark as Final Chapter
+            </label>
             <input className={INPUT_CLASS} type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => setChapterForm((current) => ({ ...current, imageFile: event.target.files?.[0] || null }))} />
             <button type="submit" disabled={submittingChapter || bookVariantOptions.length === 0} className="w-full rounded-xl bg-brand-600 px-4 py-2.5 text-white transition hover:bg-brand-500 disabled:cursor-not-allowed disabled:opacity-60">
               {submittingChapter ? 'Saving chapter...' : 'Save Chapter'}
