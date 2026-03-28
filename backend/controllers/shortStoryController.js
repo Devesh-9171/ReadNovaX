@@ -3,6 +3,7 @@ const User = require('../models/User');
 const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
 const { uploadImageBuffer } = require('../utils/cloudinaryAssets');
+const { normalizeLanguage } = require('../utils/language');
 
 function countWords(content = '') {
   return String(content).trim().split(/\s+/).filter(Boolean).length;
@@ -13,8 +14,23 @@ function parseTags(tags) {
   return String(tags || '').split(',').map((tag) => tag.trim().toLowerCase()).filter(Boolean);
 }
 
+async function resolveShortStoryGroupId({ groupId, translationOfStoryId, authorUserId }) {
+  if (translationOfStoryId) {
+    const sourceStory = await ShortStory.findOne({ _id: translationOfStoryId, authorId: authorUserId })
+      .select('groupId')
+      .lean();
+    if (!sourceStory) {
+      throw new AppError('Selected source story was not found for this author', 404);
+    }
+    return sourceStory.groupId || String(translationOfStoryId).trim();
+  }
+
+  if (groupId) return String(groupId).trim();
+  return undefined;
+}
+
 exports.createShortStory = asyncHandler(async (req, res) => {
-  const { title, coverImage, description, content, tags } = req.body;
+  const { title, coverImage, description, content, tags, language, groupId, translationOfStoryId } = req.body;
   if (!title || (!coverImage && !req.file) || !description || !content) {
     throw new AppError('title, coverImage, description, and content are required', 400);
   }
@@ -22,10 +38,26 @@ exports.createShortStory = asyncHandler(async (req, res) => {
 
   const normalizedTags = Array.from(new Set(parseTags(tags)));
   if (normalizedTags.length > 3) throw new AppError('Short stories support max 3 tags', 400);
+  const normalizedLanguage = normalizeLanguage(language, 'english');
 
   const author = await User.findById(req.user.id).select('name authorStatus role').lean();
   if (!author || author.role !== 'author' || author.authorStatus !== 'approved') {
     throw new AppError('Only approved authors can upload short stories', 403);
+  }
+
+  const nextGroupId = await resolveShortStoryGroupId({
+    groupId,
+    translationOfStoryId,
+    authorUserId: req.user._id || req.user.id
+  });
+  if (nextGroupId) {
+    const duplicateLanguage = await ShortStory.findOne({
+      groupId: nextGroupId,
+      language: normalizedLanguage
+    }).lean();
+    if (duplicateLanguage) {
+      throw new AppError('This language already exists for the selected short story group', 409);
+    }
   }
 
   let resolvedCoverImage = String(coverImage || '').trim();
@@ -44,6 +76,8 @@ exports.createShortStory = asyncHandler(async (req, res) => {
     description: String(description).trim(),
     content: String(content).trim(),
     tags: normalizedTags,
+    language: normalizedLanguage,
+    groupId: nextGroupId,
     authorId: req.user._id || req.user.id,
     authorName: String(author.name || req.user?.name || 'ReadNovaX Editorial').trim(),
     status: 'review',

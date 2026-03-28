@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { DEFAULT_LANGUAGE, SUPPORTED_LANGUAGES, normalizeLanguage } = require('../utils/language');
 
 const shortStorySchema = new mongoose.Schema(
   {
@@ -8,6 +9,15 @@ const shortStorySchema = new mongoose.Schema(
     description: { type: String, required: true, trim: true, maxlength: 600 },
     content: { type: String, required: true, trim: true },
     tags: [{ type: String, trim: true, lowercase: true }],
+    language: {
+      type: String,
+      enum: SUPPORTED_LANGUAGES,
+      required: true,
+      default: DEFAULT_LANGUAGE,
+      index: true,
+      set: (value) => normalizeLanguage(value, DEFAULT_LANGUAGE)
+    },
+    groupId: { type: String, trim: true, index: true },
     authorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     authorName: { type: String, required: true, trim: true },
     status: { type: String, enum: ['review', 'published', 'rejected'], default: 'review', index: true },
@@ -22,10 +32,16 @@ const shortStorySchema = new mongoose.Schema(
 
 shortStorySchema.pre('validate', function normalize(next) {
   this.tags = Array.from(new Set((this.tags || []).map((tag) => String(tag || '').trim().toLowerCase()).filter(Boolean)));
+  this.language = normalizeLanguage(this.language, DEFAULT_LANGUAGE);
+  if (!this.groupId && this._id) {
+    this.groupId = this._id.toString();
+  }
   if ((this.tags || []).length > 3) {
     return next(new Error('Short stories support max 3 tags'));
   }
   return next();
 });
+
+shortStorySchema.index({ groupId: 1, language: 1 }, { unique: true, sparse: true });
 
 module.exports = mongoose.model('ShortStory', shortStorySchema);
