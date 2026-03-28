@@ -50,10 +50,6 @@ async function resolveGroupId(groupId) {
   return String(groupId).trim();
 }
 
-function shouldRequireExistingGroup(language) {
-  return normalizeLanguage(language, DEFAULT_LANGUAGE) !== DEFAULT_LANGUAGE;
-}
-
 async function getPaginatedBookResults({ query = {}, sort, page, limit, preferredLanguage, projection }) {
   const effectiveProjection = projection || {
     title: 1,
@@ -137,6 +133,7 @@ exports.createBook = asyncHandler(async (req, res) => {
     featured,
     language,
     groupId,
+    translationOfBookId,
     contentType,
     tags,
     status
@@ -161,11 +158,16 @@ exports.createBook = asyncHandler(async (req, res) => {
     if (author?.authorStatus !== 'approved') throw new AppError('Only approved authors can publish content', 403);
   }
 
-  if (shouldRequireExistingGroup(normalizedLanguage) && !groupId) {
-    throw new AppError('Translated books must be linked to an existing translation group', 400);
+  let nextGroupId = await resolveGroupId(groupId);
+  if (translationOfBookId) {
+    const sourceBook = await Book.findOne({ _id: translationOfBookId, authorUserId: req.user.id })
+      .select('groupId')
+      .lean();
+    if (!sourceBook) {
+      throw new AppError('Selected source book was not found for this author', 404);
+    }
+    nextGroupId = sourceBook.groupId || String(translationOfBookId).trim();
   }
-
-  const nextGroupId = await resolveGroupId(groupId);
   const duplicateLanguage = await Book.findOne({ groupId: nextGroupId, language: normalizedLanguage }).lean();
   if (duplicateLanguage) {
     throw new AppError('This language already exists for the selected book group', 409);

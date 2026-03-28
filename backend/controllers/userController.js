@@ -1,5 +1,6 @@
 const User = require('../models/User');
 const Book = require('../models/Book');
+const ShortStory = require('../models/ShortStory');
 const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
 const { uploadImageBuffer } = require('../utils/cloudinaryAssets');
@@ -126,8 +127,12 @@ exports.enableTranslationPermission = asyncHandler(async (req, res) => {
 exports.getMyContent = asyncHandler(async (req, res) => {
   const books = await Book.find({ authorUserId: req.user.id })
     .sort({ updatedAt: -1 })
-    .select('title slug status contentType tags isCompleted language updatedAt totalViews')
+    .select('title slug status contentType tags isCompleted language groupId updatedAt totalViews')
+    .lean();
+  const shortStories = await ShortStory.find({ authorId: req.user.id })
+    .sort({ updatedAt: -1 })
+    .select('title status language groupId updatedAt views')
     .lean();
 
-  res.json({ success: true, data: books });
+  res.json({ success: true, data: books, shortStories });
 });

@@ -17,10 +17,29 @@ export default function AuthorDashboardPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [books, setBooks] = useState([]);
+  const [shortStories, setShortStories] = useState([]);
 
-  const [bookForm, setBookForm] = useState({ title: '', description: '', category: 'action', language: 'english', tags: '', coverImageFile: null });
+  const [bookForm, setBookForm] = useState({
+    title: '',
+    description: '',
+    category: 'action',
+    language: 'english',
+    tags: '',
+    coverImageFile: null,
+    isTranslation: false,
+    translationOfBookId: ''
+  });
   const [chapterForm, setChapterForm] = useState({ bookId: '', chapterNumber: '', title: '', content: '' });
-  const [storyForm, setStoryForm] = useState({ title: '', description: '', content: '', tags: '', coverImageFile: null });
+  const [storyForm, setStoryForm] = useState({
+    title: '',
+    description: '',
+    content: '',
+    language: 'english',
+    tags: '',
+    coverImageFile: null,
+    isTranslation: false,
+    translationOfStoryId: ''
+  });
   const [submitting, setSubmitting] = useState(false);
 
   const { user, token, loading: authLoading } = useAuth();
@@ -33,6 +52,7 @@ export default function AuthorDashboardPage() {
     if (!headers) return;
     const booksResponse = await api.get('/user/my-content', { headers });
     setBooks(booksResponse.data?.data || []);
+    setShortStories(booksResponse.data?.shortStories || []);
     setChapterForm((current) => ({ ...current, bookId: current.bookId || booksResponse.data?.data?.[0]?._id || '' }));
   }, [headers]);
 
@@ -101,9 +121,26 @@ export default function AuthorDashboardPage() {
       payload.append('language', bookForm.language);
       payload.append('tags', tags.join(','));
       payload.append('coverImage', bookForm.coverImageFile);
+      if (bookForm.isTranslation) {
+        if (!bookForm.translationOfBookId) {
+          setError('Please select the original story to translate.');
+          setSubmitting(false);
+          return;
+        }
+        payload.append('translationOfBookId', bookForm.translationOfBookId);
+      }
       await api.post('/books', payload, { headers });
       setSuccess('Book submitted for review.');
-      setBookForm({ title: '', description: '', category: 'action', language: 'english', tags: '', coverImageFile: null });
+      setBookForm({
+        title: '',
+        description: '',
+        category: 'action',
+        language: 'english',
+        tags: '',
+        coverImageFile: null,
+        isTranslation: false,
+        translationOfBookId: ''
+      });
       loadedForTokenRef.current = '';
       await loadData();
     } catch (requestError) {
@@ -155,11 +192,29 @@ export default function AuthorDashboardPage() {
       payload.append('title', storyForm.title.trim());
       payload.append('description', storyForm.description.trim());
       payload.append('content', storyForm.content.trim());
+      payload.append('language', storyForm.language);
       payload.append('tags', tags.join(','));
       payload.append('coverImage', storyForm.coverImageFile);
+      if (storyForm.isTranslation) {
+        if (!storyForm.translationOfStoryId) {
+          setError('Please select the original short story to translate.');
+          setSubmitting(false);
+          return;
+        }
+        payload.append('translationOfStoryId', storyForm.translationOfStoryId);
+      }
       await api.post('/short-stories', payload, { headers });
       setSuccess('Short story uploaded and queued for admin review.');
-      setStoryForm({ title: '', description: '', content: '', tags: '', coverImageFile: null });
+      setStoryForm({
+        title: '',
+        description: '',
+        content: '',
+        language: 'english',
+        tags: '',
+        coverImageFile: null,
+        isTranslation: false,
+        translationOfStoryId: ''
+      });
       loadedForTokenRef.current = '';
     } catch (requestError) {
       setError(requestError.message || 'Could not upload short story.');
@@ -199,6 +254,24 @@ export default function AuthorDashboardPage() {
               <option value="english">English</option>
               <option value="hindi">Hindi</option>
             </select>
+            <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200">
+              <input
+                type="checkbox"
+                checked={bookForm.isTranslation}
+                onChange={(e) => setBookForm((c) => ({ ...c, isTranslation: e.target.checked, translationOfBookId: e.target.checked ? c.translationOfBookId : '' }))}
+              />
+              This story is a translation of another story
+            </label>
+            {bookForm.isTranslation ? (
+              <select className={INPUT_CLASS} required value={bookForm.translationOfBookId} onChange={(e) => setBookForm((c) => ({ ...c, translationOfBookId: e.target.value }))}>
+                <option value="">Select original story</option>
+                {books.map((book) => (
+                  <option key={book._id} value={book._id}>
+                    {book.title} ({book.language})
+                  </option>
+                ))}
+              </select>
+            ) : null}
             <input className={INPUT_CLASS} placeholder="Tags (comma separated, max 10)" value={bookForm.tags} onChange={(e) => setBookForm((c) => ({ ...c, tags: e.target.value }))} />
             <input className={INPUT_CLASS} type="file" accept="image/*" required onChange={(e) => setBookForm((c) => ({ ...c, coverImageFile: e.target.files?.[0] || null }))} />
             <button disabled={submitting} className="w-full rounded-xl bg-brand-600 px-4 py-2 text-white disabled:opacity-60">{submitting ? 'Saving...' : 'Save Book'}</button>
@@ -224,8 +297,30 @@ export default function AuthorDashboardPage() {
           <p className="mt-1 text-sm text-slate-500">Single-page format only. Max 3 tags. Description max 50 words.</p>
           <div className="mt-3 grid gap-3 md:grid-cols-2">
             <input className={INPUT_CLASS} required placeholder="Title" value={storyForm.title} onChange={(e) => setStoryForm((c) => ({ ...c, title: e.target.value }))} />
+            <select className={INPUT_CLASS} required value={storyForm.language} onChange={(e) => setStoryForm((c) => ({ ...c, language: e.target.value }))}>
+              <option value="english">English</option>
+              <option value="hindi">Hindi</option>
+            </select>
             <input className={INPUT_CLASS} placeholder="Tags (comma separated, max 3)" value={storyForm.tags} onChange={(e) => setStoryForm((c) => ({ ...c, tags: e.target.value }))} />
           </div>
+          <label className="mt-3 flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200">
+            <input
+              type="checkbox"
+              checked={storyForm.isTranslation}
+              onChange={(e) => setStoryForm((c) => ({ ...c, isTranslation: e.target.checked, translationOfStoryId: e.target.checked ? c.translationOfStoryId : '' }))}
+            />
+            This story is a translation of another story
+          </label>
+          {storyForm.isTranslation ? (
+            <select className={`${INPUT_CLASS} mt-3`} required value={storyForm.translationOfStoryId} onChange={(e) => setStoryForm((c) => ({ ...c, translationOfStoryId: e.target.value }))}>
+              <option value="">Select original short story</option>
+              {shortStories.map((story) => (
+                <option key={story._id} value={story._id}>
+                  {story.title} ({story.language})
+                </option>
+              ))}
+            </select>
+          ) : null}
           <textarea className={`${INPUT_CLASS} mt-3 min-h-[90px]`} required placeholder="Description" value={storyForm.description} onChange={(e) => setStoryForm((c) => ({ ...c, description: e.target.value }))} />
           <textarea className={`${INPUT_CLASS} mt-3 min-h-[200px]`} required placeholder="Story content (single page)" value={storyForm.content} onChange={(e) => setStoryForm((c) => ({ ...c, content: e.target.value }))} />
           <input className={`${INPUT_CLASS} mt-3`} type="file" accept="image/*" required onChange={(e) => setStoryForm((c) => ({ ...c, coverImageFile: e.target.files?.[0] || null }))} />
