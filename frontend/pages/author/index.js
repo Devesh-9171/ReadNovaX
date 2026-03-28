@@ -29,7 +29,7 @@ export default function AuthorDashboardPage() {
     isTranslation: false,
     translationOfBookId: ''
   });
-  const [chapterForm, setChapterForm] = useState({ bookId: '', chapterNumber: '', title: '', content: '' });
+  const [chapterForm, setChapterForm] = useState({ bookId: '', chapterNumber: '', title: '', content: '', isFinalChapter: false });
   const [storyForm, setStoryForm] = useState({
     title: '',
     description: '',
@@ -160,7 +160,7 @@ export default function AuthorDashboardPage() {
       setSubmitting(true);
       await api.post('/chapters', chapterForm, { headers });
       setSuccess('Chapter submitted for review.');
-      setChapterForm((current) => ({ ...current, chapterNumber: '', title: '', content: '' }));
+      setChapterForm((current) => ({ ...current, chapterNumber: '', title: '', content: '', isFinalChapter: false }));
       loadedForTokenRef.current = '';
     } catch (requestError) {
       setError(requestError.message || 'Could not save chapter.');
@@ -288,6 +288,14 @@ export default function AuthorDashboardPage() {
             <input className={INPUT_CLASS} type="number" min="1" required placeholder="Chapter number" value={chapterForm.chapterNumber} onChange={(e) => setChapterForm((c) => ({ ...c, chapterNumber: e.target.value }))} />
             <input className={INPUT_CLASS} required placeholder="Chapter title" value={chapterForm.title} onChange={(e) => setChapterForm((c) => ({ ...c, title: e.target.value }))} />
             <textarea className={`${INPUT_CLASS} min-h-[150px]`} required placeholder="Chapter content" value={chapterForm.content} onChange={(e) => setChapterForm((c) => ({ ...c, content: e.target.value }))} />
+            <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200">
+              <input
+                type="checkbox"
+                checked={Boolean(chapterForm.isFinalChapter)}
+                onChange={(e) => setChapterForm((c) => ({ ...c, isFinalChapter: e.target.checked }))}
+              />
+              Mark as Final Chapter
+            </label>
             <button disabled={submitting} className="w-full rounded-xl bg-brand-600 px-4 py-2 text-white disabled:opacity-60">{submitting ? 'Saving...' : 'Save Chapter'}</button>
           </div>
         </form>

@@ -13,6 +13,7 @@ const chapterSchema = new mongoose.Schema(
     content: { type: String, required: true },
     image: { type: String, trim: true },
     imagePublicId: { type: String, trim: true },
+    isFinalChapter: { type: Boolean, default: false, index: true },
     views: { type: Number, default: 0 }
   },
   { timestamps: true }
@@ -20,6 +21,7 @@ const chapterSchema = new mongoose.Schema(
 
 chapterSchema.index({ bookId: 1, chapterNumber: 1 }, { unique: true });
 chapterSchema.index({ bookId: 1, slug: 1 }, { unique: true });
+chapterSchema.index({ bookId: 1, isFinalChapter: 1 }, { unique: true, partialFilterExpression: { isFinalChapter: true } });
 chapterSchema.index({ language: 1, updatedAt: -1 });
 chapterSchema.index({ updatedAt: -1 });
 

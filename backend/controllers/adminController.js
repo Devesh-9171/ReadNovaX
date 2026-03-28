@@ -30,6 +30,13 @@ function parseTags(inputTags) {
     .filter(Boolean);
 }
 
+function parseBoolean(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value === 1;
+  if (typeof value === 'string') return ['true', '1', 'yes', 'on'].includes(value.trim().toLowerCase());
+  return false;
+}
+
 async function resolveGroupId(groupId) {
   if (!groupId) return crypto.randomUUID();
   if (!mongoose.Types.ObjectId.isValid(groupId)) return String(groupId).trim();
@@ -137,6 +144,7 @@ exports.updateBook = asyncHandler(async (req, res) => {
 exports.addChapter = asyncHandler(async (req, res) => {
   const book = await Book.findById(req.params.bookId).select('_id language');
   if (!book) throw new AppError('Book not found', 404);
+  const isFinalChapter = parseBoolean(req.body.isFinalChapter);
 
   let image;
   let imagePublicId;
@@ -146,11 +154,16 @@ exports.addChapter = asyncHandler(async (req, res) => {
     imagePublicId = upload.publicId;
   }
 
+  if (isFinalChapter) {
+    await Chapter.updateMany({ bookId: book._id, isFinalChapter: true }, { $set: { isFinalChapter: false } });
+  }
+
   const chapter = await Chapter.create({
     ...req.body,
     bookId: book._id,
     language: book.language || DEFAULT_LANGUAGE,
     slug: generateSlug(req.body.title || `chapter-${req.body.chapterNumber}`),
+    isFinalChapter,
     image,
     imagePublicId
   });
